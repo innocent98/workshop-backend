@@ -11,12 +11,19 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements
-COPY requirements.txt .
+# Install Poetry
+RUN curl -sSL https://install.python-poetry.org | python3 - && \
+    ln -s /root/.local/bin/poetry /usr/local/bin/poetry
 
-# Install Python dependencies
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+# Configure Poetry to not create virtual environments (we're already in a container)
+ENV POETRY_VIRTUALENVS_CREATE=false \
+    POETRY_NO_INTERACTION=1
+
+# Copy dependency files
+COPY pyproject.toml poetry.lock ./
+
+# Install dependencies (production only)
+RUN poetry install --only main --no-root
 
 # Copy application
 COPY ./app /app/app

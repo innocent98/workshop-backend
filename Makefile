@@ -18,30 +18,30 @@ help:
 	@echo "  make migrate       - Run database migrations"
 
 install:
-	pip install -r requirements.txt
+	poetry install --only main
 
 dev-install:
-	pip install -r requirements.txt -r requirements-dev.txt
-	pre-commit install
+	poetry install
+	poetry run pre-commit install
 
 run:
-	uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+	poetry run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 test:
-	pytest
+	poetry run pytest
 
 test-cov:
-	pytest --cov=app --cov-report=html --cov-report=term
+	poetry run pytest --cov=app --cov-report=html --cov-report=term
 
 lint:
-	black --check app tests
-	isort --check-only app tests
-	flake8 app tests
-	mypy app
+	poetry run black --check app tests
+	poetry run isort --check-only app tests
+	poetry run flake8 app tests
+	poetry run mypy app
 
 format:
-	black app tests
-	isort app tests
+	poetry run black app tests
+	poetry run isort app tests
 
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} +
@@ -60,8 +60,8 @@ docker-down:
 	docker-compose down
 
 migrate:
-	alembic upgrade head
+	poetry run alembic upgrade head
 
 migrate-create:
 	@read -p "Enter migration message: " msg; \
-	alembic revision --autogenerate -m "$$msg"
+	poetry run alembic revision --autogenerate -m "$$msg"

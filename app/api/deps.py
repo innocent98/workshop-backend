@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.session import get_db
+from app.db.models.user import User
 
 security = HTTPBearer()
 
@@ -31,10 +32,16 @@ async def get_current_user(
     except JWTError:
         raise credentials_exception
 
-    # TODO: Fetch user from database
-    # user = db.query(User).filter(User.id == user_id).first()
-    # if user is None:
-    #     raise credentials_exception
-    # return user
+    # Fetch user from database
+    user = db.query(User).filter(User.id == user_id).first()
+    if user is None:
+        raise credentials_exception
 
-    return {"user_id": user_id}
+    # Check if user is active
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is inactive"
+        )
+
+    return user

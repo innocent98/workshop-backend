@@ -51,6 +51,17 @@ class Settings(BaseSettings):
     EMAILS_FROM_EMAIL: Optional[EmailStr] = None
     EMAILS_FROM_NAME: Optional[str] = None
 
+    # Cloudinary (for file uploads)
+    CLOUDINARY_CLOUD_NAME: Optional[str] = None
+    CLOUDINARY_API_KEY: Optional[str] = None
+    CLOUDINARY_API_SECRET: Optional[str] = None
+    CLOUDINARY_FOLDER: str = "workchop"  # Default folder in Cloudinary
+
+    # File Upload Settings
+    MAX_UPLOAD_SIZE_MB: int = 5
+    ALLOWED_IMAGE_EXTENSIONS: List[str] = ["jpg", "jpeg", "png", "gif", "webp"]
+    USE_CLOUDINARY: bool = True  # Toggle between local and cloud storage
+
     # Admin
     FIRST_SUPERUSER_EMAIL: EmailStr
     FIRST_SUPERUSER_PASSWORD: str

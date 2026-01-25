@@ -19,6 +19,7 @@ A FastAPI project
 ## Requirements
 
 - Python 3.11+
+- Poetry (for dependency management)
 - PostgreSQL (if using database)
 - Redis (if using caching)
 - Docker & Docker Compose (optional)
@@ -55,8 +56,8 @@ workchop-api/
 ├── docs/
 ├── .github/
 │   └── workflows/
-├── requirements.txt
-├── requirements-dev.txt
+├── pyproject.toml
+├── poetry.lock
 ├── Dockerfile
 ├── docker-compose.yml
 ├── .env.example
@@ -78,33 +79,34 @@ cp .env.example .env
 ### 2. Install Dependencies
 
 ```bash
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+# Install Poetry (if not already installed)
+curl -sSL https://install.python-poetry.org | python3 -
 
 # Install dependencies
-pip install -r requirements.txt
-pip install -r requirements-dev.txt
+poetry install
+
+# Activate the virtual environment (optional, Poetry will use it automatically)
+poetry shell
 ```
 
 ### 3. Database Setup
 
 ```bash
 # Run migrations
-alembic upgrade head
+poetry run alembic upgrade head
 
 # Create initial data (if needed)
-python scripts/init_db.py
+poetry run python scripts/init_db.py
 ```
 
 ### 4. Run Development Server
 
 ```bash
-# With uvicorn
-uvicorn app.main:app --reload
+# With Poetry
+poetry run uvicorn app.main:app --reload
 
-# Or with python
-python -m app.main
+# Or use the Makefile
+make run
 ```
 
 The API will be available at:
@@ -134,48 +136,59 @@ docker-compose down
 
 ```bash
 # Run all tests
-pytest
+poetry run pytest
+
+# Or use Makefile
+make test
 
 # Run with coverage
-pytest --cov=app --cov-report=html
+make test-cov
 
 # Run specific test file
-pytest tests/test_health.py
+poetry run pytest tests/test_health.py
 
 # Run with verbose output
-pytest -v
+poetry run pytest -v
 ```
 
 ### Code Quality
 
 ```bash
 # Format code
-black app tests
-isort app tests
+make format
+# Or manually:
+poetry run black app tests
+poetry run isort app tests
 
 # Lint code
-flake8 app tests
-mypy app
+make lint
+# Or manually:
+poetry run flake8 app tests
+poetry run mypy app
 
 # Run pre-commit hooks
-pre-commit install
-pre-commit run --all-files
+poetry run pre-commit install
+poetry run pre-commit run --all-files
 ```
 
 ### Database Migrations
 
 ```bash
 # Create a new migration
-alembic revision --autogenerate -m "description"
+make migrate-create
+# Or manually:
+poetry run alembic revision --autogenerate -m "description"
 
 # Apply migrations
-alembic upgrade head
+make migrate
+# Or manually:
+poetry run alembic upgrade head
 
 # Rollback migration
-alembic downgrade -1
+poetry run alembic downgrade -1
 
 # View migration history
-alembic history
+poetry run alembic history
 ```
 
 ## Environment Variables
@@ -210,10 +223,10 @@ docker run -p 8000:8000 --env-file .env workchop-api:latest
 
 ```bash
 # Install production dependencies
-pip install -r requirements.txt
+poetry install --only main
 
 # Run with gunicorn
-gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8000
+poetry run gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8000
 ```
 
 ## Contributing

@@ -12,4 +12,7 @@ def import_models():
         Service,
         UserService,
         PasswordResetToken,
+        ServiceCategory,
+        ArtisanProfile,
+        Portfolio,
     )

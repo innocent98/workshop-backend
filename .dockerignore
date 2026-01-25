@@ -25,3 +25,9 @@ coverage.xml
 *.db
 *.sqlite
 .DS_Store
+
+# Poetry
+.poetry.cache
+poetry.toml
+requirements.txt
+requirements-dev.txt

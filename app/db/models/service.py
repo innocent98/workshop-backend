@@ -19,11 +19,13 @@ class Service(Base):
     __tablename__ = "services"
 
     id = Column(Integer, primary_key=True, index=True)
+    category_id = Column(Integer, ForeignKey("service_categories.id", ondelete="CASCADE"), nullable=True, index=True)
     name = Column(String(100), unique=True, nullable=False, index=True)
     description = Column(Text, nullable=True)  # Optional description of the service
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
-    # Relationship
+    # Relationships
+    category = relationship("ServiceCategory", back_populates="services")
     user_services = relationship("UserService", back_populates="service", cascade="all, delete-orphan")
 
     def __repr__(self):
