@@ -34,7 +34,8 @@ All endpoints return JSON unless otherwise specified.
 **Success Response (201):**
 ```json
 {
-  "message": "Personal information saved successfully",
+  "success": true,
+  "message": "Personal information submitted successfully",
   "user_id": "123e4567-e89b-12d3-a456-426614174000"
 }
 ```
@@ -71,6 +72,7 @@ All endpoints return JSON unless otherwise specified.
 **Success Response (200):**
 ```json
 {
+  "success": true,
   "message": "Password set successfully"
 }
 ```
@@ -100,7 +102,8 @@ All endpoints return JSON unless otherwise specified.
 **Success Response (200):**
 ```json
 {
-  "message": "OTP sent successfully to john.doe@example.com"
+  "success": true,
+  "message": "OTP sent successfully to your email"
 }
 ```
 
@@ -134,7 +137,8 @@ All endpoints return JSON unless otherwise specified.
 **Success Response (200):**
 ```json
 {
-  "message": "OTP verified successfully"
+  "success": true,
+  "message": "Email verified successfully"
 }
 ```
 
@@ -158,30 +162,32 @@ All endpoints return JSON unless otherwise specified.
 {
   "user_id": "123e4567-e89b-12d3-a456-426614174000",
   "user_type": "artisan",
-  "services": [1, 3, 5]
+  "services": ["Pipe Repair", "Bathroom Installation", "Kitchen Plumbing"]
 }
 ```
 
 **Field Requirements:**
 - `user_id`: Required, UUID string
 - `user_type`: Required, enum: `"artisan"` or `"client"`
-- `services`: Required, array of service IDs (integers), at least one service
+- `services`: Required, array of service names (strings), at least one service
 
 **Success Response (200):**
 ```json
 {
+  "success": true,
   "message": "Services selected successfully"
 }
 ```
 
 **Implementation Notes:**
-- Service IDs must exist in the database
+- Service names must exist in the database
 - Creates many-to-many relationships between user and services
 - Multiple services can be selected
+- Services are matched by exact name (case-sensitive)
 
 **Error Responses:**
-- **400** - Empty services array or invalid service IDs
-- **404** - User not found or service ID doesn't exist
+- **400** - Empty services array, user type mismatch, or invalid UUID
+- **404** - User not found or service name doesn't exist
 
 ---
 
@@ -213,8 +219,17 @@ formData.append('profile_picture', imageFile); // File object
 **Success Response (200):**
 ```json
 {
-  "message": "Profile completed successfully",
-  "profile_picture_url": "/static/profile_pictures/123e4567_a1b2c3d4.jpg"
+  "success": true,
+  "message": "Registration completed successfully",
+  "user": {
+    "id": "123e4567-e89b-12d3-a456-426614174000",
+    "full_name": "John Doe",
+    "email": "john.doe@example.com",
+    "phone_number": "08012345678",
+    "user_type": "artisan",
+    "profile_picture_url": "https://res.cloudinary.com/workchop/profile_pictures/123e4567_a1b2c3d4.jpg",
+    "bio": "Experienced plumber with 10 years experience"
+  }
 }
 ```
 
@@ -256,27 +271,24 @@ formData.append('profile_picture', imageFile); // File object
 **Success Response (200):**
 ```json
 {
-  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "token_type": "bearer",
+  "success": true,
+  "message": "Login successful",
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
   "user": {
     "id": "123e4567-e89b-12d3-a456-426614174000",
     "full_name": "John Doe",
     "email": "john.doe@example.com",
     "phone_number": "08012345678",
     "user_type": "artisan",
-    "profile_picture_url": "/static/profile_pictures/123e4567_a1b2c3d4.jpg",
-    "bio": "Experienced plumber with 10 years experience",
-    "is_email_verified": true,
-    "is_active": true,
-    "registration_completed": true,
-    "created_at": "2025-01-19T10:30:00Z"
+    "profile_picture_url": "https://res.cloudinary.com/workchop/profile_pictures/123e4567_a1b2c3d4.jpg",
+    "bio": "Experienced plumber with 10 years experience"
   }
 }
 ```
 
 **Token Usage:**
-- Include in subsequent requests as: `Authorization: Bearer {access_token}`
-- Token expires in 7 days (configurable)
+- Include in subsequent requests as: `Authorization: Bearer {token}`
+- Token expires in 7 days (configurable via ACCESS_TOKEN_EXPIRE_MINUTES)
 - Token contains user_id in the payload
 
 **Error Responses:**
@@ -290,6 +302,12 @@ formData.append('profile_picture', imageFile); // File object
 ```json
 {
   "detail": "Account is not active"
+}
+```
+OR
+```json
+{
+  "detail": "Email address not verified. Please verify your email to continue."
 }
 ```
 OR
@@ -330,6 +348,34 @@ OR
 
 ---
 
+#### Logout
+
+**Endpoint:** `POST /auth/logout`
+
+**Headers:**
+- `Authorization`: Required, Bearer token
+
+**Request Body:**
+None (empty body)
+
+**Success Response (200):**
+```json
+{
+  "message": "Logged out successfully"
+}
+```
+
+**Implementation Notes:**
+- Blacklists the current JWT token in Redis
+- Token will be invalid until it naturally expires
+- User must login again to get a new token
+- Token blacklist automatically expires after token lifetime
+
+**Error Responses:**
+- **401** - Unauthorized (invalid or missing token)
+
+---
+
 ### 3. Password Recovery Flow (3 Steps)
 
 #### Step 1: Send Reset Code
@@ -349,7 +395,8 @@ OR
 **Success Response (200):**
 ```json
 {
-  "message": "If the email exists, a reset code has been sent"
+  "success": true,
+  "message": "Password reset code sent to your email"
 }
 ```
 
@@ -380,6 +427,7 @@ OR
 **Success Response (200):**
 ```json
 {
+  "success": true,
   "message": "Code verified successfully",
   "reset_token": "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6"
 }
@@ -423,6 +471,7 @@ OR
 **Success Response (200):**
 ```json
 {
+  "success": true,
   "message": "Password reset successfully"
 }
 ```
@@ -462,15 +511,18 @@ OR
 **Success Response (200):**
 ```json
 {
-  "message": "If the email exists, a new OTP has been sent"
+  "success": true,
+  "message": "OTP sent successfully",
+  "retry_after": 60
 }
 ```
 
 **Implementation Notes:**
-- Always returns success (security best practice)
+- Always returns success message
 - Invalidates previous OTPs
 - Generates new 6-digit OTP
 - OTP expires in 10 minutes
+- `retry_after` indicates seconds to wait before requesting another OTP (default: 60)
 
 ---
 
@@ -504,19 +556,86 @@ All endpoints may return these standard errors:
 
 ## Notes for Frontend Implementation
 
-1. **Token Storage:** Store the `access_token` securely (e.g., HttpOnly cookies or secure storage)
-2. **Token Expiry:** Token expires in 7 days. Implement refresh logic or re-login
+1. **Token Storage:** Store the `token` from login response securely (e.g., HttpOnly cookies or secure storage)
+2. **Token Expiry:** Token expires in 7 days (configurable). Implement refresh logic or re-login
 3. **File Uploads:** Use `multipart/form-data` for profile picture upload
 4. **OTP Expiry:** OTPs expire in 10 minutes. Show countdown timer
 5. **Reset Token Expiry:** Reset tokens expire in 30 minutes
 6. **Registration Flow:** All 5 steps must be completed in order
 7. **User Types:** Only `"artisan"` and `"client"` are valid user types
+8. **Response Format:** All successful responses include a `"success": true` field
+9. **Services Selection:** Step 4 requires service names (strings), not IDs - fetch service names from GET /services endpoint first
+10. **Email Verification:** Users must verify email before login. Unverified users will receive 403 error on login
 
 ---
 
 ## Services Module
 
-### 1. Get Service Categories
+### 1. Get All Services
+
+**Endpoint:** `GET /services`
+
+**Description:** Retrieve list of all available services that users can select during registration (Step 4).
+
+**Query Parameters:**
+- `skip`: Optional, integer (default: 0) - Number of records to skip for pagination
+- `limit`: Optional, integer (default: 100) - Maximum number of records to return
+- `category_id`: Optional, integer - Filter services by category ID
+
+**Success Response (200):**
+```json
+[
+  {
+    "id": 14,
+    "name": "Electrician",
+    "description": "Professional electrical services including installation, wiring, repairs, and safety inspections",
+    "image": "https://res.cloudinary.com/dlw4um9gc/image/upload/v1769783311/electrician_asjxug.png",
+    "category_id": null,
+    "created_at": "2026-01-30T14:47:41Z",
+    "category": null
+  },
+  {
+    "id": 15,
+    "name": "Plumbing",
+    "description": "Expert plumbing solutions for pipe installations, leak repairs, and water system maintenance",
+    "image": "https://res.cloudinary.com/dlw4um9gc/image/upload/v1769783357/plumber_xxipw0.png",
+    "category_id": null,
+    "created_at": "2026-01-30T14:47:41Z",
+    "category": null
+  }
+]
+```
+
+**Available Services (12 total):**
+1. **Electrician** - Professional electrical services
+2. **Plumbing** - Expert plumbing solutions
+3. **Carpentry** - Skilled woodworking services
+4. **Cleaning** - Professional cleaning services
+5. **Painting** - Quality painting services
+6. **Beauty/Makeup** - Professional makeup artistry
+7. **Construction** - Comprehensive construction services
+8. **Auto Repair** - Complete auto repair services
+9. **Electronics Repair** - Expert electronics repair
+10. **Dry Cleaning** - Professional laundry services
+11. **Fashion/Tailoring** - Custom tailoring services
+12. **Home Repair** - General handyman services
+
+**Implementation Notes:**
+- All services include an `image` field with Cloudinary URL
+- Services are sorted alphabetically by name
+- Use exact service names (case-sensitive) when submitting in registration Step 4
+- Currently, all services have `category_id: null` (categories optional)
+- Frontend should fetch this list before Step 4 of registration
+
+**IMPORTANT NOTE:**
+Services are matched by **exact name** (case-sensitive), so the frontend MUST use the exact names returned from this endpoint when submitting in Step 4 registration. For example, use `"Electrician"` not `"electrician"` or `"Electrical"`.
+
+**Error Responses:**
+- **500** - Internal server error
+
+---
+
+### 2. Get Service Categories
 
 **Endpoint:** `GET /services/categories`
 
@@ -554,7 +673,7 @@ All endpoints may return these standard errors:
 
 ---
 
-### 2. Get Service Category with Services
+### 3. Get Service Category with Services
 
 **Endpoint:** `GET /services/categories/{category_id}`
 
@@ -600,7 +719,7 @@ All endpoints may return these standard errors:
 
 ---
 
-### 3. Get Services
+### 4. Get Services (Deprecated - Use #1 Instead)
 
 **Endpoint:** `GET /services`
 
@@ -636,7 +755,7 @@ All endpoints may return these standard errors:
 
 ---
 
-### 4. Get Service by ID
+### 5. Get Service by ID
 
 **Endpoint:** `GET /services/{service_id}`
 
@@ -1199,23 +1318,23 @@ No content returned
 latitude (required): float, -90 to 90
 longitude (required): float, -180 to 180
 radius_km (optional): float, 0.1 to 100, default: 10.0
-category_id (optional): int
-service_ids (optional): string (comma-separated IDs, e.g., "1,2,3")
+category_id (optional): int - Filter by service category (currently services have no categories assigned)
+service_ids (optional): string - Comma-separated service IDs (e.g., "14,15,16")
 min_hourly_rate (optional): decimal, >= 0
 max_hourly_rate (optional): decimal, >= 0
 min_rating (optional): float, 0 to 5
 verified_only (optional): boolean, default: false
-availability_status (optional): string ("available", "busy", "offline")
+availability_status (optional): string - One of: "available", "busy", "offline"
 min_years_experience (optional): int, >= 0
-sort_by (optional): string, options: "distance", "rating", "price", "experience", "jobs_completed", "response_time", default: "distance"
-sort_order (optional): string, "asc" or "desc", default: "asc"
+sort_by (optional): string - One of: "distance", "rating", "price", "experience", "jobs_completed", "response_time", default: "distance"
+sort_order (optional): string - One of: "asc", "desc", default: "asc"
 page (optional): int, >= 1, default: 1
 page_size (optional): int, 1 to 100, default: 20
 ```
 
 **Example Request:**
 ```
-GET /search/artisans?latitude=6.5244&longitude=3.3792&radius_km=15&category_id=1&verified_only=true&min_rating=4.0&sort_by=rating&sort_order=desc&page=1&page_size=10
+GET /search/artisans?latitude=6.5244&longitude=3.3792&radius_km=15&service_ids=14,15&verified_only=true&min_rating=4.0&sort_by=rating&sort_order=desc&page=1&page_size=10
 ```
 
 **Success Response (200):**
@@ -1223,31 +1342,31 @@ GET /search/artisans?latitude=6.5244&longitude=3.3792&radius_km=15&category_id=1
 {
   "results": [
     {
-      "id": "123e4567-e89b-12d3-a456-426614174000",
-      "full_name": "John Smith",
-      "profile_picture": "https://cloudinary.com/profile.jpg",
-      "location_address": "123 Main St, Ikeja, Lagos",
-      "service_radius_km": 20.0,
-      "hourly_rate_min": 5000.00,
-      "hourly_rate_max": 15000.00,
+      "id": "0b4467de-2616-4c9f-bf0a-d4db849e26c9",
+      "full_name": "John Electrician",
+      "profile_picture": null,
+      "location_address": "Lagos, Nigeria",
+      "service_radius_km": 25.0,
+      "hourly_rate_min": "5000.00",
+      "hourly_rate_max": "10000.00",
       "years_of_experience": 8,
-      "specialization": "Commercial and residential plumbing",
+      "specialization": "Residential & Commercial Electrical Work",
       "is_verified": true,
       "availability_status": "available",
-      "average_rating": 4.7,
-      "total_ratings": 45,
-      "total_jobs_completed": 120,
-      "response_time_avg_minutes": 15,
-      "acceptance_rate": 0.85,
-      "distance_km": 2.34,
-      "services": ["Pipe Installation", "Leak Repair", "Water Heater"],
-      "portfolio_sample": "https://cloudinary.com/portfolio1.jpg"
+      "average_rating": 3.8,
+      "total_ratings": 26,
+      "total_jobs_completed": 94,
+      "response_time_avg_minutes": 81,
+      "acceptance_rate": 0.84,
+      "distance_km": 2.47,
+      "services": ["Electrician"],
+      "portfolio_sample": null
     }
   ],
-  "total": 25,
+  "total": 10,
   "page": 1,
   "page_size": 10,
-  "total_pages": 3,
+  "total_pages": 1,
   "search_location": {
     "latitude": 6.5244,
     "longitude": 3.3792
@@ -1255,7 +1374,7 @@ GET /search/artisans?latitude=6.5244&longitude=3.3792&radius_km=15&category_id=1
   "filters_applied": {
     "radius_km": 15.0,
     "verified_only": true,
-    "category_id": 1,
+    "service_ids": [14, 15],
     "min_rating": 4.0
   }
 }
@@ -1264,29 +1383,30 @@ GET /search/artisans?latitude=6.5244&longitude=3.3792&radius_km=15&category_id=1
 **Response Fields:**
 - `results`: Array of artisan search results
   - `id`: Artisan user ID (UUID string)
-  - `full_name`: Artisan's full name
+  - `full_name`: Artisan's full name (string)
   - `profile_picture`: URL to profile image or null
-  - `location_address`: Human-readable address
-  - `service_radius_km`: How far the artisan is willing to travel
-  - `hourly_rate_min/max`: Rate range in NGN (can be null)
-  - `years_of_experience`: Years of experience (can be null)
-  - `specialization`: Artisan's area of specialization
-  - `is_verified`: Whether artisan is verified
-  - `availability_status`: Current availability
-  - `average_rating`: Average rating (0.0 to 5.0)
-  - `total_ratings`: Number of ratings received
-  - `total_jobs_completed`: Total completed jobs
-  - `response_time_avg_minutes`: Average response time in minutes
-  - `acceptance_rate`: Job acceptance rate (0.0 to 1.0)
-  - `distance_km`: Distance from search location in kilometers
-  - `services`: Array of service names offered by artisan
+  - `location_address`: Human-readable address (string or null)
+  - `service_radius_km`: How far the artisan is willing to travel (float)
+  - `hourly_rate_min`: Minimum hourly rate in NGN (string in decimal format like "5000.00" or null)
+  - `hourly_rate_max`: Maximum hourly rate in NGN (string in decimal format like "10000.00" or null)
+  - `years_of_experience`: Years of experience (integer or null)
+  - `specialization`: Artisan's area of specialization (string or null)
+  - `is_verified`: Whether artisan is verified (boolean)
+  - `availability_status`: Current availability (string: "available", "busy", or "offline")
+  - `average_rating`: Average rating (float, 0.0 to 5.0)
+  - `total_ratings`: Number of ratings received (integer)
+  - `total_jobs_completed`: Total completed jobs (integer)
+  - `response_time_avg_minutes`: Average response time in minutes (integer or null)
+  - `acceptance_rate`: Job acceptance rate (float, 0.0 to 1.0)
+  - `distance_km`: Distance from search location in kilometers (float, rounded to 2 decimals)
+  - `services`: Array of service names offered by artisan (array of strings)
   - `portfolio_sample`: URL to one portfolio image or null
-- `total`: Total number of results matching criteria
-- `page`: Current page number
-- `page_size`: Number of results per page
-- `total_pages`: Total number of pages
-- `search_location`: The coordinates used for search
-- `filters_applied`: Summary of filters used in the search
+- `total`: Total number of results matching criteria (integer)
+- `page`: Current page number (integer)
+- `page_size`: Number of results per page (integer)
+- `total_pages`: Total number of pages (integer)
+- `search_location`: The coordinates used for search (object with latitude and longitude)
+- `filters_applied`: Summary of filters used in the search (object with applied filter keys and values)
 
 **Implementation Notes:**
 - Uses PostGIS ST_DWithin for efficient spatial queries
@@ -1296,6 +1416,8 @@ GET /search/artisans?latitude=6.5244&longitude=3.3792&radius_km=15&category_id=1
 - Price filtering considers both min and max hourly rates (shows artisan if rate range overlaps filter)
 - Sorting by "price" uses hourly_rate_min
 - Pagination starts at page 1
+- **Data Types:** Decimal fields (hourly rates) are returned as strings (e.g., "5000.00") not numbers
+- The `service_ids` parameter accepts a comma-separated string of IDs (e.g., "14,15"), which is parsed and returned as an array in filters_applied
 
 **Error Responses:**
 - **400** - Invalid query parameters (e.g., latitude out of range)
@@ -1314,6 +1436,8 @@ GET /search/artisans?latitude=6.5244&longitude=3.3792&radius_km=15&category_id=1
 
 **Description:** Get aggregated statistics about service availability in a specific location. Shows which services are available, how many artisans offer each service, and average rates and ratings.
 
+**IMPORTANT LIMITATION:** This endpoint currently requires services to have a category assigned. Since all services in the current database have `category_id = null`, this endpoint will return an empty array `[]` until service categories are properly configured.
+
 **Query Parameters:**
 ```
 latitude (required): float, -90 to 90
@@ -1324,10 +1448,15 @@ category_id (optional): int
 
 **Example Request:**
 ```
-GET /search/services/availability?latitude=6.5244&longitude=3.3792&radius_km=20&category_id=1
+GET /search/services/availability?latitude=6.5244&longitude=3.3792&radius_km=20
 ```
 
 **Success Response (200):**
+```json
+[]
+```
+
+**Note:** Currently returns empty array because services don't have categories assigned. Once categories are configured, the response format will be:
 ```json
 [
   {
@@ -1336,39 +1465,30 @@ GET /search/services/availability?latitude=6.5244&longitude=3.3792&radius_km=20&
     "category_id": 1,
     "category_name": "Plumbing",
     "artisans_available": 12,
-    "average_hourly_rate": 8500.50,
+    "average_hourly_rate": "8500.50",
     "average_rating": 4.3,
     "closest_artisan_distance_km": 1.25
-  },
-  {
-    "service_id": 2,
-    "service_name": "Leak Repair",
-    "category_id": 1,
-    "category_name": "Plumbing",
-    "artisans_available": 15,
-    "average_hourly_rate": 7000.00,
-    "average_rating": 4.5,
-    "closest_artisan_distance_km": 0.85
   }
 ]
 ```
 
-**Response Fields:**
-- `service_id`: Service ID
-- `service_name`: Name of the service
-- `category_id`: Category ID
-- `category_name`: Category name
-- `artisans_available`: Number of available artisans offering this service
-- `average_hourly_rate`: Average hourly rate for this service (can be null)
-- `average_rating`: Average rating of artisans offering this service (can be null)
-- `closest_artisan_distance_km`: Distance to the closest artisan offering this service
+**Response Fields (when categories are configured):**
+- `service_id`: Service ID (integer)
+- `service_name`: Name of the service (string)
+- `category_id`: Category ID (integer)
+- `category_name`: Category name (string)
+- `artisans_available`: Number of available artisans offering this service (integer)
+- `average_hourly_rate`: Average hourly rate for this service (string in decimal format like "8500.50" or null)
+- `average_rating`: Average rating of artisans offering this service (float or null, rounded to 1 decimal)
+- `closest_artisan_distance_km`: Distance to the closest artisan offering this service (float or null, rounded to 2 decimals)
 
 **Implementation Notes:**
 - Only counts artisans with availability_status = "available"
-- Only includes active services
+- Requires services to have category_id assigned (INNER JOIN with service_categories table)
 - Results are grouped by service and ordered by category name, then service name
 - Statistics are calculated only for artisans within the specified radius
 - If no artisans are available for a service, it won't appear in results
+- **Currently non-functional** due to missing service categories in database
 
 **Error Responses:**
 - **400** - Invalid query parameters
@@ -1391,39 +1511,41 @@ radius_km (optional): float, 0.1 to 100, default: 10.0
 
 **Example Request:**
 ```
-GET /search/artisans/nearby/summary?latitude=6.5244&longitude=3.3792&radius_km=25
+GET /search/artisans/nearby/summary?latitude=6.5244&longitude=3.3792&radius_km=50
 ```
 
 **Success Response (200):**
 ```json
 {
-  "total_artisans": 47,
-  "total_verified": 32,
-  "total_available": 38,
-  "services_offered": 28,
+  "total_artisans": 10,
+  "total_verified": 5,
+  "total_available": 10,
+  "services_offered": 10,
   "average_rating": 4.4,
   "distance_range_km": {
-    "min": 0.35,
-    "max": 24.87
+    "min": 2.47,
+    "max": 4.56
   }
 }
 ```
 
 **Response Fields:**
-- `total_artisans`: Total number of artisans in the area
-- `total_verified`: Number of verified artisans
-- `total_available`: Number of currently available artisans
-- `services_offered`: Total number of unique services offered
-- `average_rating`: Average rating across all artisans
-- `distance_range_km`: Distance range of artisans found
-  - `min`: Distance to the closest artisan
-  - `max`: Distance to the farthest artisan (within radius)
+- `total_artisans`: Total number of artisans in the area (integer)
+- `total_verified`: Number of verified artisans (integer)
+- `total_available`: Number of currently available artisans (integer, where availability_status = "available")
+- `services_offered`: Total number of unique services offered by all artisans in the area (integer)
+- `average_rating`: Average rating across all artisans (float, rounded to 1 decimal, defaults to 0.0 if no artisans)
+- `distance_range_km`: Distance range of artisans found (object)
+  - `min`: Distance to the closest artisan (float, rounded to 2 decimals, defaults to 0.0 if no artisans)
+  - `max`: Distance to the farthest artisan within radius (float, rounded to 2 decimals, defaults to 0.0 if no artisans)
 
 **Implementation Notes:**
 - Useful for showing availability indicators before performing detailed search
 - Can be used to determine if it's worth expanding search radius
-- All statistics exclude inactive users
+- All statistics exclude inactive users (is_active = false)
 - Average rating is calculated across all artisans, not weighted by number of ratings
+- Only counts artisans with location data set (location IS NOT NULL)
+- Services count includes all unique services offered by artisans in the area
 
 **Error Responses:**
 - **400** - Invalid query parameters
@@ -1443,6 +1565,9 @@ GET /search/artisans/nearby/summary?latitude=6.5244&longitude=3.3792&radius_km=2
 15. **Coordinates:** Nigeria's approximate coordinates: Lagos (6.5244, 3.3792), Abuja (9.0765, 7.3986), Port Harcourt (4.8156, 7.0498)
 16. **Distance Calculation:** All distances use PostGIS ST_Distance on WGS84 geography for accurate results
 17. **Search Performance:** Location-based searches are optimized with spatial indexes for fast queries
+18. **Decimal Values:** All decimal/money fields (hourly rates, average rates) are returned as strings in JSON (e.g., "5000.00" not 5000.00). Parse them as numbers in your frontend code.
+19. **Service IDs Filter:** When using `service_ids` parameter, pass as comma-separated string (e.g., "14,15,16"), not as an array
+20. **Service Categories:** The `/search/services/availability` endpoint is currently non-functional because services don't have categories assigned. It will return an empty array until service categories are configured in the database.
 
 ---
 
@@ -1456,5 +1581,5 @@ GET /search/artisans/nearby/summary?latitude=6.5244&longitude=3.3792&radius_km=2
 
 ---
 
-**Last Updated:** 2026-01-21
+**Last Updated:** 2026-01-30
 **API Version:** v1

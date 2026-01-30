@@ -68,7 +68,10 @@ class ArtisanProfile(Base):
 
     # Relationships
     user = relationship("User", back_populates="artisan_profile")
-    portfolio = relationship("Portfolio", back_populates="artisan", cascade="all, delete-orphan")
+    portfolio = relationship("Portfolio", back_populates="artisan",
+                           primaryjoin="ArtisanProfile.user_id==Portfolio.artisan_id",
+                           foreign_keys="Portfolio.artisan_id",
+                           cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<ArtisanProfile user_id={self.user_id} verified={self.is_verified}>"

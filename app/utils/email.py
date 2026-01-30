@@ -2,6 +2,7 @@
 Email sending utilities with SMTP support and HTML templates.
 """
 import smtplib
+import asyncio
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from pathlib import Path
@@ -103,9 +104,9 @@ def send_email_smtp(
         return False
 
 
-def send_otp_email(email: str, otp_code: str, purpose: str = "verification") -> bool:
+async def send_otp_email(email: str, otp_code: str, purpose: str = "verification") -> bool:
     """
-    Send OTP code via email.
+    Send OTP code via email (async).
 
     Args:
         email: Recipient email address
@@ -150,16 +151,17 @@ If you didn't request this code, please ignore this email.
 Workchop Team
 """
 
-        return send_email_smtp(email, subject, html_content, text_content)
+        # Run SMTP in thread pool to avoid blocking
+        return await asyncio.to_thread(send_email_smtp, email, subject, html_content, text_content)
 
     except Exception as e:
         logger.error(f"Failed to send OTP email to {email}: {str(e)}")
         return False
 
 
-def send_password_reset_email(email: str, reset_token: str) -> bool:
+async def send_password_reset_email(email: str, reset_token: str) -> bool:
     """
-    Send password reset email.
+    Send password reset email (async).
     Note: This sends an OTP code, not a reset link.
 
     Args:
@@ -169,12 +171,12 @@ def send_password_reset_email(email: str, reset_token: str) -> bool:
     Returns:
         True if email sent successfully, False otherwise
     """
-    return send_otp_email(email, reset_token, purpose="password_reset")
+    return await send_otp_email(email, reset_token, purpose="password_reset")
 
 
-def send_welcome_email(email: str, full_name: str) -> bool:
+async def send_welcome_email(email: str, full_name: str) -> bool:
     """
-    Send welcome email after successful registration.
+    Send welcome email after successful registration (async).
 
     Args:
         email: Recipient email address
@@ -212,7 +214,8 @@ Need help? Contact our support team at support@workchop.ng
 Workchop Team
 """
 
-        return send_email_smtp(email, subject, html_content, text_content)
+        # Run SMTP in thread pool to avoid blocking
+        return await asyncio.to_thread(send_email_smtp, email, subject, html_content, text_content)
 
     except Exception as e:
         logger.error(f"Failed to send welcome email to {email}: {str(e)}")

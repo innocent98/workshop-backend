@@ -220,6 +220,22 @@ class ResendOTPResponse(BaseModel):
 
 
 # ============================================================================
+# LOGOUT SCHEMA
+# ============================================================================
+
+class LogoutResponse(BaseModel):
+    """Logout response"""
+    message: str
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "message": "Logged out successfully"
+            }
+        }
+
+
+# ============================================================================
 # ERROR RESPONSE SCHEMA
 # ============================================================================
 

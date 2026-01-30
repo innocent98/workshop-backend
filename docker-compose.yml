@@ -1,9 +1,11 @@
-version: '3.8'
-
 services:
   api:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: workchop-api_api
+    platform: linux/amd64
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     ports:
       - "8000:8000"
     volumes:
@@ -22,14 +24,27 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    # Resource limits for production
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
 
   db:
-    image: postgis/postgis:15-3.4
+    image: postgis/postgis:15-3.4-alpine
     container_name: workchop-api_db
+    platform: linux/amd64
     environment:
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
       POSTGRES_DB: workchop_db
+      # Performance tuning
+      POSTGRES_SHARED_BUFFERS: 256MB
+      POSTGRES_EFFECTIVE_CACHE_SIZE: 1GB
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
@@ -40,10 +55,21 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
 
   redis:
     image: redis:7-alpine
     container_name: workchop-api_redis
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
     ports:
       - "6379:6379"
     restart: unless-stopped
@@ -52,26 +78,45 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
 
-  pgadmin:
-    image: dpage/pgadmin4
-    container_name: workchop-api_pgadmin
-    environment:
-      PGADMIN_DEFAULT_EMAIL: admin@workchop.com
-      PGADMIN_DEFAULT_PASSWORD: admin123
-      PGADMIN_CONFIG_SERVER_MODE: 'False'
-    volumes:
-      - pgadmin_data:/var/lib/pgadmin
+  # Adminer - Lightweight database management (replaces PgAdmin)
+  # Access at http://localhost:8080
+  # ~90MB vs PgAdmin's ~300MB+
+  adminer:
+    image: adminer:4-standalone
+    container_name: workchop-api_adminer
     ports:
-      - "5050:80"
+      - "8080:8080"
+    environment:
+      ADMINER_DEFAULT_SERVER: db
+      ADMINER_DESIGN: nette
     depends_on:
       - db
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
 
   celery_worker:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: workchop-api_celery_worker
-    command: celery -A app.celery_app worker --loglevel=info
+    platform: linux/amd64
+    command: celery -A app.celery_app worker --loglevel=info --concurrency=2
     volumes:
       - ./app:/app/app
     env_file:
@@ -88,10 +133,21 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
 
   celery_beat:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: workchop-api_celery_beat
+    platform: linux/amd64
     command: celery -A app.celery_app beat --loglevel=info
     volumes:
       - ./app:/app/app
@@ -103,7 +159,15 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
 
 volumes:
   postgres_data:
-  pgadmin_data:
+  redis_data:  # Added Redis persistence

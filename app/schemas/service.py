@@ -44,6 +44,7 @@ class ServiceBase(BaseModel):
     """Base schema for Service"""
     name: str = Field(..., min_length=1, max_length=100)
     description: Optional[str] = None
+    image: Optional[str] = Field(None, max_length=500)
     category_id: Optional[int] = None
 
 

@@ -8,10 +8,10 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "workchop-api"
     VERSION: str = "1.0.0"
     API_V1_STR: str = "/api/v1"
-    ENVIRONMENT: str = "development"
+    ENVIRONMENT: str
 
     # Server
-    SERVER_HOST: str = "http://localhost"
+    SERVER_HOST: str
     SERVER_PORT: int = 8000
 
     # Security
@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     DATABASE_MAX_OVERFLOW: int = 10
 
     # Redis
-    REDIS_URL: str = "redis://localhost:6379/0"
+    REDIS_URL: str
 
     # Email (optional)
     SMTP_TLS: bool = True

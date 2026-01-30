@@ -22,6 +22,7 @@ class Service(Base):
     category_id = Column(Integer, ForeignKey("service_categories.id", ondelete="CASCADE"), nullable=True, index=True)
     name = Column(String(100), unique=True, nullable=False, index=True)
     description = Column(Text, nullable=True)  # Optional description of the service
+    image = Column(String(500), nullable=True)  # Optional image URL for the service
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     # Relationships

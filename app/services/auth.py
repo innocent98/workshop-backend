@@ -4,6 +4,7 @@ Business logic for user registration, login, and password recovery.
 """
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
+from uuid import UUID
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status, UploadFile
 
@@ -16,6 +17,20 @@ from app.utils.otp import generate_otp, calculate_otp_expiry, is_otp_expired
 from app.utils.email import send_otp_email, send_welcome_email
 from app.utils.file_upload import save_profile_picture
 from app.core.logger import log
+
+
+def parse_uuid(user_id: str) -> UUID:
+    """
+    Safely parse a string to UUID.
+    Raises HTTP 400 if invalid UUID format.
+    """
+    try:
+        return UUID(user_id)
+    except (ValueError, AttributeError, TypeError) as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid user ID format. Expected UUID, got: {user_id}"
+        )
 
 
 class AuthService:
@@ -74,7 +89,8 @@ class AuthService:
         """
         Step 2: Set user password.
         """
-        user = db.query(User).filter(User.id == user_id).first()
+        uuid_id = parse_uuid(user_id)
+        user = db.query(User).filter(User.id == uuid_id).first()
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -98,7 +114,8 @@ class AuthService:
         """
         Step 3a: Send OTP for email verification.
         """
-        user = db.query(User).filter(User.id == user_id, User.email == email).first()
+        uuid_id = parse_uuid(user_id)
+        user = db.query(User).filter(User.id == uuid_id, User.email == email).first()
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -107,7 +124,7 @@ class AuthService:
 
         # Invalidate any existing unused OTPs for this user
         db.query(OTP).filter(
-            OTP.user_id == user_id,
+            OTP.user_id == uuid_id,
             OTP.otp_type == OTPType.PHONE_VERIFICATION,
             OTP.is_used == False
         ).update({"is_used": True})
@@ -141,7 +158,8 @@ class AuthService:
         """
         Step 3b: Verify OTP code.
         """
-        user = db.query(User).filter(User.id == user_id).first()
+        uuid_id = parse_uuid(user_id)
+        user = db.query(User).filter(User.id == uuid_id).first()
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -150,7 +168,7 @@ class AuthService:
 
         # Find the OTP
         otp = db.query(OTP).filter(
-            OTP.user_id == user_id,
+            OTP.user_id == uuid_id,
             OTP.otp_code == otp_code,
             OTP.otp_type == OTPType.PHONE_VERIFICATION,
             OTP.is_used == False
@@ -191,7 +209,8 @@ class AuthService:
         """
         Step 4: Select services.
         """
-        user = db.query(User).filter(User.id == user_id).first()
+        uuid_id = parse_uuid(user_id)
+        user = db.query(User).filter(User.id == uuid_id).first()
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -206,7 +225,7 @@ class AuthService:
             )
 
         # Delete existing user services
-        db.query(UserService).filter(UserService.user_id == user_id).delete()
+        db.query(UserService).filter(UserService.user_id == uuid_id).delete()
 
         # Add new services
         for service_name in service_ids:
@@ -235,7 +254,8 @@ class AuthService:
         Step 5: Complete profile with bio and picture.
         Marks registration as completed.
         """
-        user = db.query(User).filter(User.id == user_id).first()
+        uuid_id = parse_uuid(user_id)
+        user = db.query(User).filter(User.id == uuid_id).first()
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -293,6 +313,13 @@ class AuthService:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Account is inactive"
+            )
+
+        # Check if email is verified
+        if not user.is_email_verified:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Email address not verified. Please verify your email to continue."
             )
 
         # Check if registration is completed

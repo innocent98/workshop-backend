@@ -17,4 +17,11 @@ echo "Running database migrations..."
 alembic upgrade head
 
 echo "Starting application..."
-exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+# Execute the command passed to the container (allows celery, uvicorn, etc.)
+if [ $# -eq 0 ]; then
+    # No command provided, use default uvicorn
+    exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+else
+    # Execute the provided command
+    exec "$@"
+fi

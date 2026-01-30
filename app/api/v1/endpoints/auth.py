@@ -3,8 +3,10 @@ Authentication endpoints.
 Implements all 13 authentication endpoints from API documentation.
 """
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Request
 from sqlalchemy.orm import Session
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from app.db.session import get_db
 from app.services.auth import AuthService
@@ -33,11 +35,16 @@ from app.schemas.auth import (
     ForgotPasswordResetResponse,
     ResendOTPRequest,
     ResendOTPResponse,
+    LogoutResponse,
 )
 from app.core.logger import log
+from app.api.deps import get_current_user
+from app.core.token_blacklist import blacklist_token
+from app.db.models.user import User
 
 
 router = APIRouter()
+limiter = Limiter(key_func=get_remote_address)
 
 
 # ============================================================================
@@ -101,8 +108,10 @@ def register_set_password(
     response_model=SendOTPResponse,
     summary="Step 3a: Send OTP for Email Verification",
 )
+@limiter.limit("3/10minutes")
 async def register_send_otp(
-    request: SendOTPRequest,
+    body: SendOTPRequest,
+    request: Request,
     db: Session = Depends(get_db),
 ):
     """
@@ -111,8 +120,8 @@ async def register_send_otp(
     """
     success = await AuthService.send_verification_otp(
         db=db,
-        user_id=request.user_id,
-        email=request.email,
+        user_id=body.user_id,
+        email=body.email,
     )
 
     if not success:
@@ -131,8 +140,10 @@ async def register_send_otp(
     response_model=VerifyOTPResponse,
     summary="Step 3b: Verify OTP",
 )
+@limiter.limit("5/10minutes")
 def register_verify_otp(
-    request: VerifyOTPRequest,
+    body: VerifyOTPRequest,
+    request: Request,
     db: Session = Depends(get_db),
 ):
     """
@@ -141,8 +152,8 @@ def register_verify_otp(
     """
     AuthService.verify_otp(
         db=db,
-        user_id=request.user_id,
-        otp_code=request.otp_code,
+        user_id=body.user_id,
+        otp_code=body.otp_code,
     )
 
     return VerifyOTPResponse(
@@ -213,8 +224,10 @@ async def register_complete_profile(
     response_model=LoginResponse,
     summary="Standard Login",
 )
+@limiter.limit("5/15minutes")
 def login(
-    request: LoginRequest,
+    body: LoginRequest,
+    request: Request,
     db: Session = Depends(get_db),
 ):
     """
@@ -223,8 +236,8 @@ def login(
     """
     access_token, user = AuthService.login_user(
         db=db,
-        email=request.email,
-        password=request.password,
+        email=body.email,
+        password=body.password,
     )
 
     return LoginResponse(
@@ -269,8 +282,10 @@ def google_sign_in(
     response_model=ForgotPasswordSendCodeResponse,
     summary="Step 1: Request Password Reset Code",
 )
+@limiter.limit("3/10minutes")
 async def forgot_password_send_code(
-    request: ForgotPasswordSendCodeRequest,
+    body: ForgotPasswordSendCodeRequest,
+    request: Request,
     db: Session = Depends(get_db),
 ):
     """
@@ -279,7 +294,7 @@ async def forgot_password_send_code(
     """
     await AuthService.send_password_reset_code(
         db=db,
-        email=request.email,
+        email=body.email,
     )
 
     return ForgotPasswordSendCodeResponse(
@@ -347,8 +362,10 @@ def forgot_password_reset(
     response_model=ResendOTPResponse,
     summary="Resend OTP",
 )
+@limiter.limit("3/10minutes")
 async def resend_otp(
-    request: ResendOTPRequest,
+    body: ResendOTPRequest,
+    request: Request,
     db: Session = Depends(get_db),
 ):
     """
@@ -356,11 +373,37 @@ async def resend_otp(
     """
     await AuthService.resend_otp(
         db=db,
-        email=request.email,
-        otp_type=request.type,
+        email=body.email,
+        otp_type=body.type,
     )
 
     return ResendOTPResponse(
         message="OTP sent successfully",
         retry_after=60,
     )
+
+
+@router.post(
+    "/logout",
+    response_model=LogoutResponse,
+    summary="Logout",
+)
+def logout(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Logout user by blacklisting their current token.
+    The token will be invalid until it naturally expires.
+    """
+    # Extract token from Authorization header
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header.split(" ")[1]
+
+        # Blacklist the token
+        blacklist_token(token)
+
+        log.info(f"User logged out: {current_user.email}")
+
+    return LogoutResponse(message="Logged out successfully")

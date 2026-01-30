@@ -13,7 +13,7 @@ import math
 from app.api.deps import get_db
 from app.db.models.user import User
 from app.db.models.artisan_profile import ArtisanProfile, AvailabilityStatus
-from app.db.models.service import Service
+from app.db.models.service import Service, UserService
 from app.db.models.service_category import ServiceCategory
 from app.db.models.portfolio import Portfolio
 from app.schemas.search import (
@@ -81,9 +81,11 @@ def search_artisans(
     }
 
     if category_id:
-        # Filter by category through services
+        # Filter by category through UserService join
         query = query.join(
-            Service, Service.artisan_id == User.id
+            UserService, UserService.user_id == User.id
+        ).join(
+            Service, UserService.service_id == Service.id
         ).filter(
             Service.category_id == category_id
         )
@@ -93,7 +95,9 @@ def search_artisans(
         # Parse comma-separated service IDs
         service_id_list = [int(sid.strip()) for sid in service_ids.split(",")]
         query = query.join(
-            Service, Service.artisan_id == User.id
+            UserService, UserService.user_id == User.id
+        ).join(
+            Service, UserService.service_id == Service.id
         ).filter(
             Service.id.in_(service_id_list)
         )
@@ -133,7 +137,25 @@ def search_artisans(
         filters_applied["min_years_experience"] = min_years_experience
 
     # Remove duplicates if we joined with services
-    query = query.distinct(ArtisanProfile.id, User.id)
+    # We need to do this before ordering to avoid DISTINCT ON conflicts
+    if category_id or service_ids:
+        # If we filtered by services, we need to deduplicate
+        # Use a subquery approach to maintain proper ordering
+        from sqlalchemy import select
+
+        # Get unique artisan profile IDs that match filters
+        subq = query.with_entities(ArtisanProfile.id).distinct().subquery()
+
+        # Re-query with full data for those IDs
+        query = db.query(
+            ArtisanProfile,
+            User,
+            (func.ST_Distance(ArtisanProfile.location, search_point_geog) / 1000).label('distance_km')
+        ).join(
+            User, ArtisanProfile.user_id == User.id
+        ).filter(
+            ArtisanProfile.id.in_(select(subq.c.id))
+        )
 
     # Apply sorting
     sort_column = None
@@ -175,9 +197,10 @@ def search_artisans(
     artisan_results = []
     for artisan_profile, user, distance_km in results:
         # Get services offered by this artisan
-        services = db.query(Service.name).filter(
-            Service.artisan_id == user.id,
-            Service.is_active == True
+        services = db.query(Service.name).join(
+            UserService, UserService.service_id == Service.id
+        ).filter(
+            UserService.user_id == user.id
         ).all()
         service_names = [s.name for s in services]
 
@@ -189,7 +212,7 @@ def search_artisans(
         artisan_results.append(ArtisanSearchResult(
             id=str(user.id),
             full_name=user.full_name,
-            profile_picture=user.profile_picture,
+            profile_picture=user.profile_picture_url,
             location_address=artisan_profile.location_address,
             service_radius_km=artisan_profile.service_radius_km,
             hourly_rate_min=artisan_profile.hourly_rate_min,
@@ -251,14 +274,15 @@ def get_service_availability(
         func.avg(ArtisanProfile.average_rating).label('average_rating'),
         func.min(func.ST_Distance(ArtisanProfile.location, search_point_geog) / 1000).label('closest_distance_km')
     ).join(
-        User, Service.artisan_id == User.id
+        UserService, UserService.service_id == Service.id
+    ).join(
+        User, UserService.user_id == User.id
     ).join(
         ArtisanProfile, ArtisanProfile.user_id == User.id
     ).join(
         ServiceCategory, Service.category_id == ServiceCategory.id
     ).filter(
         User.is_active == True,
-        Service.is_active == True,
         ArtisanProfile.location.isnot(None),
         ArtisanProfile.availability_status == AvailabilityStatus.AVAILABLE,
         func.ST_DWithin(ArtisanProfile.location, search_point_geog, radius_meters)
@@ -332,12 +356,13 @@ def get_nearby_artisans_summary(
     services_count = db.query(
         func.count(func.distinct(Service.id))
     ).join(
-        User, Service.artisan_id == User.id
+        UserService, UserService.service_id == Service.id
+    ).join(
+        User, UserService.user_id == User.id
     ).join(
         ArtisanProfile, ArtisanProfile.user_id == User.id
     ).filter(
         User.is_active == True,
-        Service.is_active == True,
         ArtisanProfile.location.isnot(None),
         func.ST_DWithin(ArtisanProfile.location, search_point_geog, radius_meters)
     ).scalar()

@@ -1,0 +1,145 @@
+# Test User Credentials - Workchop API
+
+## Active Test User
+**User ID:** 2ef4accb-54ce-4add-a388-12d3b2d5295d
+**Full Name:** Test User
+**Email:** testuser001@example.com
+**Phone:** 08123456789
+**Password:** TestPass123
+**User Type:** client
+**Email Verified:** Yes ✅
+**Registration Status:** Step 3 complete (email verified)
+
+---
+
+## Test Endpoints
+
+### 1. Register New User (Step 1)
+```bash
+curl -X POST "http://localhost:8000/api/v1/auth/register/personal-info" \
+-H "Content-Type: application/json" \
+-d '{"full_name":"Test User","email":"testuser001@example.com","phone_number":"08123456789","user_type":"client"}'
+```
+
+### 2. Set Password (Step 2)
+```bash
+curl -X POST "http://localhost:8000/api/v1/auth/register/password" \
+-H "Content-Type: application/json" \
+-d '{"user_id":"2ef4accb-54ce-4add-a388-12d3b2d5295d","password":"TestPass123","confirm_password":"TestPass123"}'
+```
+
+### 3. Send OTP (Step 3a)
+```bash
+curl -X POST "http://localhost:8000/api/v1/auth/register/send-otp" \
+-H "Content-Type: application/json" \
+-d '{"user_id":"2ef4accb-54ce-4add-a388-12d3b2d5295d","email":"testuser001@example.com"}'
+```
+
+### 4. Verify OTP (Step 3b)
+```bash
+curl -X POST "http://localhost:8000/api/v1/auth/register/verify-otp" \
+-H "Content-Type: application/json" \
+-d '{"user_id":"2ef4accb-54ce-4add-a388-12d3b2d5295d","otp_code":"123456"}'
+```
+
+### 5. Login (Requires email verification)
+```bash
+curl -X POST "http://localhost:8000/api/v1/auth/login" \
+-H "Content-Type: application/json" \
+-d '{"email":"testuser001@example.com","password":"TestPass123"}'
+```
+
+### 6. Logout
+```bash
+curl -X POST "http://localhost:8000/api/v1/auth/logout" \
+-H "Authorization: Bearer YOUR_TOKEN_HERE"
+```
+
+---
+
+## SMTP Configuration Status
+
+**Current Settings:**
+- Host: smtp.gmail.com
+- Port: 465 (SSL)
+- TLS: false
+- User: workchop26@gmail.com
+- From: workchop26@gmail.com
+
+**Status:** ✅ WORKING
+
+**Last Test:**
+- OTP sent successfully to testuser001@example.com
+- OTP Code: 001245
+- Email verified successfully
+
+**Note:** Port 465 (SMTP_SSL) works from Docker, port 587 (STARTTLS) was blocked.
+
+---
+
+## Database Access
+
+**Adminer:** http://localhost:8080
+- Server: db
+- Username: user
+- Password: password
+- Database: workchop_db
+
+**Direct psql:**
+```bash
+docker exec -it workchop-api_db psql -U user -d workchop_db
+```
+
+---
+
+## Rate Limiting (Active)
+
+- `/register/send-otp`: 3 per 10 min
+- `/login`: 5 per 15 min
+- `/forgot-password/send-code`: 3 per 10 min
+- `/register/verify-otp`: 5 per 10 min
+- `/resend-otp`: 3 per 10 min
+
+---
+
+## Available Services (Seeded with Images)
+
+**Endpoint:** GET http://localhost:8000/api/v1/services
+
+**Service Names (use exact names in Step 4 registration):**
+1. **Electrician** - Professional electrical services including installation, wiring, repairs, and safety inspections
+2. **Plumbing** - Expert plumbing solutions for pipe installations, leak repairs, and water system maintenance
+3. **Carpentry** - Skilled woodworking services for furniture making, repairs, and custom carpentry projects
+4. **Cleaning** - Professional cleaning services for homes, offices, and commercial spaces
+5. **Painting** - Quality painting services for interior and exterior walls, ceilings, and surfaces
+6. **Beauty/Makeup** - Professional makeup artistry, beauty treatments, and styling services
+7. **Construction** - Comprehensive construction services including building, renovation, and remodeling
+8. **Auto Repair** - Complete auto repair and maintenance services for all vehicle types
+9. **Electronics Repair** - Expert repair services for electronics, appliances, and gadgets
+10. **Dry Cleaning** - Professional laundry, dry cleaning, and garment care services
+11. **Fashion/Tailoring** - Custom tailoring, alterations, and fashion design services
+12. **Home Repair** - General handyman and home repair services for all household fixes
+
+**Note:** All services include image URLs from Cloudinary
+
+**Example Step 4 Request:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/auth/register/services" \
+-H "Content-Type: application/json" \
+-d '{"user_id":"USER_ID_HERE","user_type":"client","services":["Electrician","Plumbing"]}'
+```
+
+---
+
+## Security Features (Enabled)
+
+✅ Email verification required for login
+✅ Rate limiting on auth endpoints
+✅ Token blacklisting on logout
+✅ Async email sending
+✅ Password hashing with bcrypt
+✅ JWT token authentication
+
+---
+
+Last Updated: 2026-01-30

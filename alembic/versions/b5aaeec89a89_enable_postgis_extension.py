@@ -17,16 +17,11 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Enable PostGIS extension
+    # Enable core PostGIS extension (sufficient for point geometry and distance calculations)
+    # Topology and raster extensions removed - not needed for basic spatial operations
     op.execute('CREATE EXTENSION IF NOT EXISTS postgis;')
-    # Enable PostGIS topology support (optional but useful)
-    op.execute('CREATE EXTENSION IF NOT EXISTS postgis_topology;')
-    # Enable PostGIS raster support (optional)
-    op.execute('CREATE EXTENSION IF NOT EXISTS postgis_raster;')
 
 
 def downgrade() -> None:
-    # Disable extensions in reverse order
-    op.execute('DROP EXTENSION IF EXISTS postgis_raster;')
-    op.execute('DROP EXTENSION IF EXISTS postgis_topology;')
+    # Disable extension
     op.execute('DROP EXTENSION IF EXISTS postgis;')

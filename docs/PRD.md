@@ -72,6 +72,7 @@ Mobile Layout
 User Stories:
   As a customer, I want to search for artisans based on proximity, pricing, and ratings, so that I can book the right professional for the job.
   As a customer, I want to view verified artisans near my location, so that I can choose trustworthy professionals.
+  
 Service Booking Flow Flow Summary:
 Search or browse services
 Set job date/time, address (use Google Maps API)

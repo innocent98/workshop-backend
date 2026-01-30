@@ -30,7 +30,9 @@ class Portfolio(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     # Relationships
-    artisan = relationship("ArtisanProfile", back_populates="portfolio", foreign_keys=[artisan_id])
+    artisan = relationship("ArtisanProfile", back_populates="portfolio",
+                          primaryjoin="Portfolio.artisan_id==ArtisanProfile.user_id",
+                          foreign_keys=[artisan_id])
 
     def __repr__(self):
         return f"<Portfolio id={self.id} artisan_id={self.artisan_id}>"
