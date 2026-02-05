@@ -15,4 +15,7 @@ def import_models():
         ServiceCategory,
         ArtisanProfile,
         Portfolio,
+        Booking,
+        Payment,
+        Review,
     )

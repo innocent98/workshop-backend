@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     BACKEND_CORS_ORIGINS: List[str] = [
         "http://localhost:3000",
         "http://localhost:8000",
+        "https://0b7fd6f1a85b.ngrok-free.app"
     ]
 
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
@@ -61,6 +62,12 @@ class Settings(BaseSettings):
     MAX_UPLOAD_SIZE_MB: int = 5
     ALLOWED_IMAGE_EXTENSIONS: List[str] = ["jpg", "jpeg", "png", "gif", "webp"]
     USE_CLOUDINARY: bool = True  # Toggle between local and cloud storage
+
+    # Paystack Payment Gateway
+    PAYSTACK_SECRET_KEY: Optional[str] = None
+    PAYSTACK_PUBLIC_KEY: Optional[str] = None
+    PAYSTACK_WEBHOOK_SECRET: Optional[str] = None
+    PAYSTACK_BASE_URL: str = "https://api.paystack.co"
 
     # Admin
     FIRST_SUPERUSER_EMAIL: EmailStr

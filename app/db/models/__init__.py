@@ -6,6 +6,9 @@ from app.db.models.password_reset import PasswordResetToken
 from app.db.models.service_category import ServiceCategory
 from app.db.models.artisan_profile import ArtisanProfile, AvailabilityStatus
 from app.db.models.portfolio import Portfolio
+from app.db.models.booking import Booking, BookingStatus
+from app.db.models.payment import Payment, PaymentStatus, PaymentMethod
+from app.db.models.review import Review
 
 __all__ = [
     "User",
@@ -19,4 +22,10 @@ __all__ = [
     "ArtisanProfile",
     "AvailabilityStatus",
     "Portfolio",
+    "Booking",
+    "BookingStatus",
+    "Payment",
+    "PaymentStatus",
+    "PaymentMethod",
+    "Review",
 ]

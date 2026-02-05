@@ -799,7 +799,11 @@ Services are matched by **exact name** (case-sensitive), so the frontend MUST us
 Authorization: Bearer {access_token}
 ```
 
-### 1. Customer Profile
+---
+
+### Customer Profile Endpoints
+
+Available to all authenticated users (both customers and artisans can access their basic profile).
 
 #### Get My Customer Profile
 
@@ -815,7 +819,7 @@ Authorization: Bearer {access_token}
   "full_name": "Jane Smith",
   "email": "jane@example.com",
   "phone_number": "08012345678",
-  "profile_picture_url": "/static/profile_pictures/123e4567_a1b2c3d4.jpg",
+  "profile_picture_url": "https://res.cloudinary.com/workchop/image/upload/v1234567890/profile_pictures/123e4567_a1b2c3d4.jpg",
   "bio": "Looking for reliable artisans",
   "is_email_verified": true,
   "is_active": true,
@@ -823,9 +827,19 @@ Authorization: Bearer {access_token}
 }
 ```
 
+**Field Descriptions:**
+- `id`: User UUID (string)
+- `full_name`: User's full name (string)
+- `email`: User's email address (string)
+- `phone_number`: User's phone number (string)
+- `profile_picture_url`: Cloudinary image URL or null (string or null)
+- `bio`: User biography (string or null)
+- `is_email_verified`: Email verification status (boolean)
+- `is_active`: Account active status (boolean)
+- `created_at`: Account creation timestamp (ISO 8601 datetime string)
+
 **Error Responses:**
 - **401** - Unauthorized (invalid or missing token)
-- **403** - User account is inactive
 
 ---
 
@@ -857,7 +871,7 @@ Authorization: Bearer {access_token}
   "full_name": "Jane Smith Updated",
   "email": "jane@example.com",
   "phone_number": "08087654321",
-  "profile_picture_url": "/static/profile_pictures/123e4567_a1b2c3d4.jpg",
+  "profile_picture_url": "https://res.cloudinary.com/workchop/image/upload/v1234567890/profile_pictures/123e4567_a1b2c3d4.jpg",
   "bio": "Updated bio text",
   "is_email_verified": true,
   "is_active": true,
@@ -872,9 +886,11 @@ Authorization: Bearer {access_token}
 
 ---
 
-### 2. Artisan Profile
+### Artisan Profile Endpoints
 
-#### Get My Artisan Profile
+Only available to users with `user_type: "artisan"`.
+
+#### Get My Artisan Profile (Private)
 
 **Endpoint:** `GET /profiles/artisans/me`
 
@@ -890,13 +906,13 @@ Authorization: Bearer {access_token}
   "full_name": "John Doe",
   "email": "john@example.com",
   "phone_number": "08012345678",
-  "profile_picture_url": "/static/profile_pictures/123e4567_a1b2c3d4.jpg",
+  "profile_picture_url": "https://res.cloudinary.com/workchop/image/upload/v1234567890/profile_pictures/123e4567_a1b2c3d4.jpg",
   "bio": "Experienced plumber with 10 years",
   "user_type": "artisan",
   "location_address": "123 Main St, Lagos",
   "service_radius_km": 15.0,
-  "hourly_rate_min": 5000,
-  "hourly_rate_max": 15000,
+  "hourly_rate_min": "5000.00",
+  "hourly_rate_max": "15000.00",
   "years_of_experience": 10,
   "specialization": "Residential plumbing",
   "is_verified": true,
@@ -911,9 +927,34 @@ Authorization: Bearer {access_token}
 }
 ```
 
+**Field Descriptions:**
+- `id`: User UUID (string)
+- `full_name`: Artisan's full name (string)
+- `email`: Artisan's email address (string) - **Private field**
+- `phone_number`: Artisan's phone number (string) - **Private field**
+- `profile_picture_url`: Cloudinary image URL or null (string or null)
+- `bio`: Artisan biography (string or null)
+- `user_type`: User type (string: "artisan")
+- `location_address`: Human-readable address (string or null)
+- `service_radius_km`: Service radius in kilometers (float, default: 10.0)
+- `hourly_rate_min`: Minimum hourly rate in NGN (string decimal format like "5000.00" or null)
+- `hourly_rate_max`: Maximum hourly rate in NGN (string decimal format like "15000.00" or null)
+- `years_of_experience`: Years of experience (integer or null)
+- `specialization`: Area of specialization (string or null)
+- `is_verified`: Admin verification status (boolean)
+- `verified_at`: Verification timestamp (ISO 8601 datetime string or null)
+- `availability_status`: Current availability (string: "available", "busy", or "offline")
+- `average_rating`: Average rating (float, 0.0 to 5.0)
+- `total_ratings`: Number of ratings received (integer)
+- `total_jobs_completed`: Total completed jobs (integer)
+- `response_time_avg_minutes`: Average response time in minutes (integer or null)
+- `acceptance_rate`: Job acceptance rate (float, 0.0 to 1.0) - **Private field**
+- `created_at`: Account creation timestamp (ISO 8601 datetime string)
+
 **Implementation Notes:**
-- If artisan profile doesn't exist, it will be created automatically
-- Returns private view with all details including email
+- If artisan profile doesn't exist, it will be created automatically with default values
+- Returns private view with all details including email, phone_number, and acceptance_rate
+- `service_radius_km` defaults to 10.0 if not set
 
 **Error Responses:**
 - **401** - Unauthorized
@@ -960,19 +1001,20 @@ Authorization: Bearer {access_token}
 - `specialization`: Optional, string (max 200 characters)
 
 **Success Response (200):**
+Returns full artisan profile (same format as GET /profiles/artisans/me):
 ```json
 {
   "id": "123e4567-e89b-12d3-a456-426614174000",
   "full_name": "John Doe",
   "email": "john@example.com",
   "phone_number": "08012345678",
-  "profile_picture_url": "/static/profile_pictures/123e4567_a1b2c3d4.jpg",
+  "profile_picture_url": "https://res.cloudinary.com/workchop/image/upload/v1234567890/profile_pictures/123e4567_a1b2c3d4.jpg",
   "bio": "Experienced plumber with 10 years",
   "user_type": "artisan",
   "location_address": "123 Main St, Lagos",
   "service_radius_km": 15.0,
-  "hourly_rate_min": 5000,
-  "hourly_rate_max": 15000,
+  "hourly_rate_min": "5000.00",
+  "hourly_rate_max": "15000.00",
   "years_of_experience": 10,
   "specialization": "Residential plumbing",
   "is_verified": true,
@@ -1014,7 +1056,7 @@ Authorization: Bearer {access_token}
 - `availability_status`: Required, enum: `"available"`, `"busy"`, or `"offline"`
 
 **Success Response (200):**
-Returns full artisan profile (same as GET /profiles/artisans/me)
+Returns full artisan profile (same format as GET /profiles/artisans/me)
 
 **Error Responses:**
 - **403** - Only artisans can access this endpoint
@@ -1042,6 +1084,13 @@ Returns full artisan profile (same as GET /profiles/artisans/me)
 }
 ```
 
+**Field Descriptions:**
+- `average_rating`: Average rating (float, 0.0 to 5.0)
+- `total_ratings`: Number of ratings received (integer)
+- `total_jobs_completed`: Total completed jobs (integer)
+- `response_time_avg_minutes`: Average response time in minutes (integer or null)
+- `acceptance_rate`: Job acceptance rate (float, 0.0 to 1.0)
+
 **Implementation Notes:**
 - If no artisan profile exists, returns default stats (all zeros)
 
@@ -1064,12 +1113,12 @@ Returns full artisan profile (same as GET /profiles/artisans/me)
 {
   "id": "123e4567-e89b-12d3-a456-426614174000",
   "full_name": "John Doe",
-  "profile_picture_url": "/static/profile_pictures/123e4567_a1b2c3d4.jpg",
+  "profile_picture_url": "https://res.cloudinary.com/workchop/image/upload/v1234567890/profile_pictures/123e4567_a1b2c3d4.jpg",
   "bio": "Experienced plumber with 10 years",
   "location_address": "123 Main St, Lagos",
   "service_radius_km": 15.0,
-  "hourly_rate_min": 5000,
-  "hourly_rate_max": 15000,
+  "hourly_rate_min": "5000.00",
+  "hourly_rate_max": "15000.00",
   "years_of_experience": 10,
   "specialization": "Residential plumbing",
   "is_verified": true,
@@ -1081,9 +1130,18 @@ Returns full artisan profile (same as GET /profiles/artisans/me)
 }
 ```
 
+**Field Descriptions:**
+- All fields same as private profile, except:
+- **NO** `email` (private)
+- **NO** `phone_number` (private)
+- **NO** `user_type` (not needed)
+- **NO** `acceptance_rate` (private)
+- **NO** `verified_at` (not needed)
+- **NO** `created_at` (not needed)
+
 **Implementation Notes:**
-- Returns public view only (no email, phone number, or private details)
-- Email and sensitive information are excluded
+- Returns public view only - excludes email, phone number, acceptance_rate, and other sensitive/private details
+- Used when customers view artisan profiles during search
 
 **Error Responses:**
 - **400** - User is not an artisan
@@ -1092,7 +1150,9 @@ Returns full artisan profile (same as GET /profiles/artisans/me)
 
 ---
 
-### 3. Portfolio Management
+### Portfolio Management (Artisan Only)
+
+All portfolio endpoints are only available to artisans.
 
 #### Get My Portfolio
 
@@ -1109,7 +1169,7 @@ Returns full artisan profile (same as GET /profiles/artisans/me)
   {
     "id": 1,
     "artisan_id": "123e4567-e89b-12d3-a456-426614174000",
-    "image_url": "https://res.cloudinary.com/workchop/portfolio/image1.jpg",
+    "image_url": "https://res.cloudinary.com/workchop/image/upload/v1234567890/portfolio/image1.jpg",
     "title": "Bathroom Renovation",
     "description": "Complete bathroom renovation for residential client",
     "project_date": "2025-01-15T00:00:00Z",
@@ -1119,7 +1179,7 @@ Returns full artisan profile (same as GET /profiles/artisans/me)
   {
     "id": 2,
     "artisan_id": "123e4567-e89b-12d3-a456-426614174000",
-    "image_url": "https://res.cloudinary.com/workchop/portfolio/image2.jpg",
+    "image_url": "https://res.cloudinary.com/workchop/image/upload/v1234567890/portfolio/image2.jpg",
     "title": "Kitchen Plumbing",
     "description": "Installed new kitchen sink and fixtures",
     "project_date": null,
@@ -1129,9 +1189,19 @@ Returns full artisan profile (same as GET /profiles/artisans/me)
 ]
 ```
 
+**Field Descriptions:**
+- `id`: Portfolio item ID (integer)
+- `artisan_id`: Artisan's user UUID (string)
+- `image_url`: Cloudinary image URL (string, required)
+- `title`: Portfolio item title (string or null)
+- `description`: Portfolio item description (string or null)
+- `project_date`: Project completion date (ISO 8601 datetime string or null)
+- `display_order`: Display order for sorting (integer, default: 0)
+- `created_at`: Creation timestamp (ISO 8601 datetime string)
+
 **Implementation Notes:**
-- Returns empty array if no portfolio items
-- Sorted by display_order, then created_at (newest first)
+- Returns empty array `[]` if no portfolio items
+- Sorted by display_order (ascending), then created_at (descending/newest first)
 
 **Error Responses:**
 - **403** - Only artisans can access this endpoint
@@ -1168,14 +1238,14 @@ formData.append('display_order', '1');
 - Max size: 10MB (larger than profile pictures)
 - Formats: JPEG, PNG, GIF, WEBP
 - Image is automatically resized to max 1920x1920 pixels
-- Image is compressed and optimized
+- Image is compressed and optimized for web delivery
 
 **Success Response (201):**
 ```json
 {
   "id": 1,
   "artisan_id": "123e4567-e89b-12d3-a456-426614174000",
-  "image_url": "https://res.cloudinary.com/workchop/portfolio/image1.jpg",
+  "image_url": "https://res.cloudinary.com/workchop/image/upload/v1234567890/portfolio/image1.jpg",
   "title": "Bathroom Renovation",
   "description": "Complete bathroom renovation for residential client",
   "project_date": null,
@@ -1220,15 +1290,16 @@ formData.append('display_order', '1');
 - `display_order`: Optional, integer
 
 **Implementation Notes:**
-- This endpoint updates metadata only, not the image
+- This endpoint updates metadata only, **not the image**
 - To change the image, delete and create a new portfolio item
+- All fields are optional - only send fields you want to update
 
 **Success Response (200):**
 ```json
 {
   "id": 1,
   "artisan_id": "123e4567-e89b-12d3-a456-426614174000",
-  "image_url": "https://res.cloudinary.com/workchop/portfolio/image1.jpg",
+  "image_url": "https://res.cloudinary.com/workchop/image/upload/v1234567890/portfolio/image1.jpg",
   "title": "Updated Title",
   "description": "Updated description",
   "project_date": "2025-01-15T00:00:00Z",
@@ -1260,8 +1331,9 @@ formData.append('display_order', '1');
 No content returned
 
 **Implementation Notes:**
-- Deletes both the database record and the image from Cloudinary/storage
+- Deletes both the database record and the image from Cloudinary
 - Returns 204 No Content on success
+- This action is irreversible
 
 **Error Responses:**
 - **403** - Only artisans can access this endpoint
@@ -1285,7 +1357,7 @@ No content returned
   {
     "id": 1,
     "artisan_id": "123e4567-e89b-12d3-a456-426614174000",
-    "image_url": "https://res.cloudinary.com/workchop/portfolio/image1.jpg",
+    "image_url": "https://res.cloudinary.com/workchop/image/upload/v1234567890/portfolio/image1.jpg",
     "title": "Bathroom Renovation",
     "description": "Complete bathroom renovation for residential client",
     "project_date": "2025-01-15T00:00:00Z",
@@ -1296,8 +1368,9 @@ No content returned
 ```
 
 **Implementation Notes:**
-- Returns empty array if artisan has no portfolio items
-- Sorted by display_order, then created_at (newest first)
+- Returns empty array `[]` if artisan has no portfolio items
+- Sorted by display_order (ascending), then created_at (descending/newest first)
+- Same response format as private endpoint
 
 **Error Responses:**
 - **404** - Artisan not found
@@ -1553,33 +1626,1045 @@ GET /search/artisans/nearby/summary?latitude=6.5244&longitude=3.3792&radius_km=5
 
 ---
 
+## Wallet Module
+
+### Overview
+The wallet module allows artisans to track their earnings, view payment history, and manage payouts. All wallet endpoints are artisan-only.
+
+### 1. Get Wallet Balance
+
+**Endpoint:** `GET /wallet/balance`
+
+**Authentication:** Required (Artisan only)
+
+**Success Response (200):**
+```json
+{
+  "total_earned": "125000.00",
+  "pending_release": "25000.00",
+  "total_jobs_completed": 15,
+  "total_jobs_paid": 12,
+  "lifetime_earnings": "125000.00"
+}
+```
+
+**Field Descriptions:**
+- `total_earned`: Total amount released to artisan (withdrawn/paid out)
+- `pending_release`: Payments that are SUCCESS (paid by customer) but not yet released to artisan
+- `total_jobs_completed`: Count of completed bookings
+- `total_jobs_paid`: Count of paid bookings (PAID, IN_PROGRESS, or COMPLETED status)
+- `lifetime_earnings`: All-time earnings (currently same as total_earned)
+
+**Error Responses:**
+- **403** - Only artisans can access wallet
+
+**Notes:**
+- Shows real-time balance calculated from payment records
+- Pending release represents funds held in escrow awaiting job completion
+- Total earned only includes RELEASED payments (actual payouts)
+
+---
+
+### 2. Get Earnings History
+
+**Endpoint:** `GET /wallet/earnings`
+
+**Authentication:** Required (Artisan only)
+
+**Query Parameters:**
+- `status` (optional): Filter by payment status (pending, success, released, etc.)
+- `page` (optional, default 1): Page number
+- `page_size` (optional, default 20, max 100): Items per page
+
+**Success Response (200):**
+```json
+{
+  "earnings": [
+    {
+      "payment_id": 1,
+      "payment_reference": "PAY-2026-000001",
+      "booking_id": 1,
+      "booking_reference": "BK-2026-000001",
+      "amount": "7500.00",
+      "status": "success",
+      "customer_name": "Alice Customer",
+      "service_name": "Electrician",
+      "job_date": "2026-02-15T10:00:00Z",
+      "paid_at": "2026-02-05T14:15:00Z",
+      "released_at": null,
+      "created_at": "2026-02-05T14:10:00Z"
+    }
+  ],
+  "total": 25,
+  "page": 1,
+  "page_size": 20,
+  "summary": {
+    "total_amount": "187500.00",
+    "count": 20
+  }
+}
+```
+
+**Error Responses:**
+- **400** - Invalid status filter
+- **403** - Only artisans can access earnings history
+
+**Notes:**
+- Shows all payments related to artisan's bookings
+- Includes booking and customer details for context
+- Summary shows totals for the current page
+- Can filter by status to see only released payments, pending, etc.
+
+---
+
+### 3. Get Payout History
+
+**Endpoint:** `GET /wallet/payouts`
+
+**Authentication:** Required (Artisan only)
+
+**Query Parameters:**
+- `page` (optional, default 1): Page number
+- `page_size` (optional, default 20, max 100): Items per page
+
+**Success Response (200):**
+```json
+{
+  "payouts": [
+    {
+      "payment_id": 1,
+      "payment_reference": "PAY-2026-000001",
+      "payout_reference": "PAYOUT-PAY-2026-000001",
+      "amount": "7500.00",
+      "released_at": "2026-02-15T15:00:00Z",
+      "booking_reference": "BK-2026-000001",
+      "customer_name": "Alice Customer"
+    }
+  ],
+  "total": 10,
+  "page": 1,
+  "page_size": 20
+}
+```
+
+**Error Responses:**
+- **403** - Only artisans can access payout history
+
+**Notes:**
+- Shows only RELEASED payments (actual payouts received)
+- Ordered by release date (most recent first)
+- Includes payout reference for tracking
+- This represents money that has actually been paid out to the artisan
+
+---
+
+### 4. Get Wallet Statistics
+
+**Endpoint:** `GET /wallet/stats`
+
+**Authentication:** Required (Artisan only)
+
+**Success Response (200):**
+```json
+{
+  "total_earnings": "125000.00",
+  "average_job_value": "8333.33",
+  "highest_earning": "25000.00",
+  "lowest_earning": "5000.00",
+  "total_transactions": 15
+}
+```
+
+**Field Descriptions:**
+- `total_earnings`: Sum of all successful payments
+- `average_job_value`: Mean payment amount
+- `highest_earning`: Maximum single payment
+- `lowest_earning`: Minimum single payment
+- `total_transactions`: Count of successful payments
+
+**Error Responses:**
+- **403** - Only artisans can access wallet stats
+
+**Notes:**
+- Useful for analytics and performance tracking
+- Only includes SUCCESS and RELEASED payments
+- Excludes pending, failed, and refunded payments
+
+---
+
+### 5. Request Payout
+
+**Endpoint:** `POST /wallet/payout/request`
+
+**Authentication:** Required (Artisan only)
+
+**Request Body:**
+```json
+{
+  "amount": 50000.00,
+  "account_number": "0123456789",
+  "bank_code": "057",
+  "account_name": "John Artisan"
+}
+```
+
+**Field Requirements:**
+- `amount`: Required, decimal, minimum ₦5,000, must not exceed available balance
+- `account_number`: Required, string, 10-digit bank account number
+- `bank_code`: Required, string, Nigerian bank code (e.g., "057" for Zenith)
+- `account_name`: Required, string, account holder's name
+
+**Success Response (200):**
+```json
+{
+  "success": true,
+  "message": "Payout of ₦50000.00 initiated successfully",
+  "payout_reference": "BATCH-20260205141530",
+  "amount": "50000.00",
+  "account_number": "0123456789",
+  "bank_code": "057",
+  "status": "processing"
+}
+```
+
+**Error Responses:**
+- **400** - Below minimum amount, insufficient balance, or invalid bank details
+- **403** - Only artisans can request payouts
+- **500** - Paystack API error (bank verification failed, transfer failed, etc.)
+
+**Notes:**
+- Minimum payout amount: ₦5,000
+- Available balance = Pending Release (SUCCESS status payments)
+- Bank account is verified with Paystack before processing
+- Multiple payments may be released to fulfill the requested amount
+- Payments are released in chronological order (oldest first)
+- Once released, payment status changes to RELEASED
+
+**Common Bank Codes:**
+- Access Bank: 044
+- GTBank: 058
+- First Bank: 011
+- UBA: 033
+- Zenith Bank: 057
+- [Full list available via Paystack API]
+
+---
+
 ## Additional Notes for Frontend Implementation
 
-8. **Authentication:** Profile and portfolio endpoints require JWT Bearer token (search endpoints are public)
-9. **Availability Status:** Valid values are `"available"`, `"busy"`, `"offline"`
-10. **Location:** When updating location, both latitude and longitude are required together
-11. **Portfolio Images:** Portfolio images support larger file sizes (10MB vs 5MB for profiles)
-12. **Image Dimensions:** Portfolio images are resized to max 1920x1920, profiles to 1080x1080
-13. **Public vs Private:** Artisan public profiles exclude email and phone number for privacy
-14. **Search Radius:** Default search radius is 10km, maximum is 100km
-15. **Coordinates:** Nigeria's approximate coordinates: Lagos (6.5244, 3.3792), Abuja (9.0765, 7.3986), Port Harcourt (4.8156, 7.0498)
-16. **Distance Calculation:** All distances use PostGIS ST_Distance on WGS84 geography for accurate results
-17. **Search Performance:** Location-based searches are optimized with spatial indexes for fast queries
-18. **Decimal Values:** All decimal/money fields (hourly rates, average rates) are returned as strings in JSON (e.g., "5000.00" not 5000.00). Parse them as numbers in your frontend code.
-19. **Service IDs Filter:** When using `service_ids` parameter, pass as comma-separated string (e.g., "14,15,16"), not as an array
-20. **Service Categories:** The `/search/services/availability` endpoint is currently non-functional because services don't have categories assigned. It will return an empty array until service categories are configured in the database.
+### Profile & Portfolio Module
+
+1. **Authentication:** Profile and portfolio endpoints require JWT Bearer token (search endpoints are public)
+2. **User Types:** Customer profile endpoints are available to all users; artisan profile endpoints only to artisans
+3. **Public vs Private Profiles:** Artisan public profiles exclude: email, phone_number, acceptance_rate, verified_at, created_at, and user_type
+4. **Image URLs:** Profile and portfolio images are hosted on Cloudinary with URLs like `https://res.cloudinary.com/workchop/image/upload/...` (can also be `null`)
+5. **Availability Status:** Valid values are `"available"`, `"busy"`, `"offline"`
+6. **Location:** When updating artisan location, both latitude and longitude are required together
+7. **Portfolio Images:** Portfolio images support larger file sizes (10MB vs 5MB for profiles)
+8. **Image Dimensions:** Portfolio images are resized to max 1920x1920, profiles to 1080x1080
+9. **Decimal Values:** Hourly rates (hourly_rate_min, hourly_rate_max) are returned as strings in JSON (e.g., "5000.00" not 5000). Parse them as numbers in your frontend code.
+10. **Service Radius Default:** The `service_radius_km` field defaults to 10.0 if not set by the artisan
+
+### Search Module
+
+11. **Search Radius:** Default search radius is 10km, maximum is 100km
+12. **Coordinates:** Nigeria's approximate coordinates: Lagos (6.5244, 3.3792), Abuja (9.0765, 7.3986), Port Harcourt (4.8156, 7.0498)
+13. **Distance Calculation:** All distances use PostGIS ST_Distance on WGS84 geography for accurate results
+14. **Search Performance:** Location-based searches are optimized with spatial indexes for fast queries
+15. **Decimal Values in Search:** All decimal/money fields (hourly rates, average rates) are returned as strings in JSON (e.g., "5000.00" not 5000.00). Parse them as numbers in your frontend code.
+16. **Service IDs Filter:** When using `service_ids` parameter, pass as comma-separated string (e.g., "14,15,16"), not as an array
+17. **Service Categories:** The `/search/services/availability` endpoint is currently non-functional because services don't have categories assigned. It will return an empty array until service categories are configured in the database.
+
+---
+
+## Booking Module
+
+### Overview
+The booking system allows customers to book artisan services, make payments via Paystack, track job progress, and leave reviews. The flow follows these status transitions:
+
+**Status Flow:**
+```
+PENDING → ACCEPTED → PAID → IN_PROGRESS → COMPLETED
+   ↓         ↓
+REJECTED  CANCELLED
+```
+
+### 1. Create Booking
+
+**Endpoint:** `POST /bookings`
+
+**Authentication:** Required (Customer only)
+
+**Request Body:**
+```json
+{
+  "artisan_id": "123e4567-e89b-12d3-a456-426614174000",
+  "service_id": 14,
+  "job_description": "Need electrical wiring for new room",
+  "job_date": "2026-02-15T10:00:00Z",
+  "job_address": "123 Main Street, Lagos, Nigeria",
+  "job_latitude": 6.5244,
+  "job_longitude": 3.3792,
+  "budget_min": 5000.00,
+  "budget_max": 10000.00
+}
+```
+
+**Field Requirements:**
+- `artisan_id`: Required, UUID of the artisan
+- `service_id`: Required, integer ID of the service
+- `job_description`: Optional, text description
+- `job_date`: Required, ISO 8601 datetime, must be in the future
+- `job_address`: Required, string (5-500 characters)
+- `job_latitude`: Required, float (-90 to 90)
+- `job_longitude`: Required, float (-180 to 180)
+- `budget_min`: Required, decimal (>= 0)
+- `budget_max`: Required, decimal (>= budget_min)
+
+**Success Response (201):**
+```json
+{
+  "id": 1,
+  "booking_reference": "BK-2026-000001",
+  "customer_id": "customer-uuid",
+  "artisan_id": "artisan-uuid",
+  "service_id": 14,
+  "job_description": "Need electrical wiring for new room",
+  "job_date": "2026-02-15T10:00:00Z",
+  "job_address": "123 Main Street, Lagos, Nigeria",
+  "job_latitude": 6.5244,
+  "job_longitude": 3.3792,
+  "budget_min": "5000.00",
+  "budget_max": "10000.00",
+  "agreed_amount": null,
+  "status": "pending",
+  "accepted_at": null,
+  "paid_at": null,
+  "started_at": null,
+  "completed_at": null,
+  "cancelled_at": null,
+  "completion_notes": null,
+  "completion_images": null,
+  "cancellation_reason": null,
+  "rejection_reason": null,
+  "created_at": "2026-02-05T14:00:00Z",
+  "updated_at": "2026-02-05T14:00:00Z"
+}
+```
+
+**Error Responses:**
+- **400** - Validation error (invalid date, budget range, coordinates)
+- **403** - Only customers can create bookings
+- **404** - Artisan or service not found
+
+---
+
+### 2. List Bookings
+
+**Endpoint:** `GET /bookings`
+
+**Authentication:** Required
+
+**Query Parameters:**
+- `status` (optional): Filter by status (pending, accepted, paid, in_progress, completed, cancelled, rejected, disputed)
+- `page` (optional, default 1): Page number
+- `page_size` (optional, default 20, max 100): Items per page
+
+**Success Response (200):**
+```json
+{
+  "bookings": [
+    {
+      "id": 1,
+      "booking_reference": "BK-2026-000001",
+      "status": "pending",
+      ...
+    }
+  ],
+  "total": 5,
+  "page": 1,
+  "page_size": 20
+}
+```
+
+**Notes:**
+- Customers see bookings they created
+- Artisans see bookings assigned to them
+
+---
+
+### 3. Get Single Booking
+
+**Endpoint:** `GET /bookings/{booking_id}`
+
+**Authentication:** Required
+
+**Success Response (200):**
+```json
+{
+  "id": 1,
+  "booking_reference": "BK-2026-000001",
+  "customer_id": "customer-uuid",
+  "artisan_id": "artisan-uuid",
+  ...
+}
+```
+
+**Error Responses:**
+- **403** - User doesn't have permission to view this booking
+- **404** - Booking not found
+
+---
+
+### 4. Get Booking Statistics
+
+**Endpoint:** `GET /bookings/stats`
+
+**Authentication:** Required
+
+**Success Response (200):**
+```json
+{
+  "total_bookings": 10,
+  "pending_bookings": 2,
+  "accepted_bookings": 1,
+  "paid_bookings": 3,
+  "in_progress_bookings": 1,
+  "completed_bookings": 2,
+  "cancelled_bookings": 1,
+  "rejected_bookings": 0,
+  "disputed_bookings": 0
+}
+```
+
+---
+
+### 5. Accept Booking (Artisan)
+
+**Endpoint:** `PATCH /bookings/{booking_id}/accept`
+
+**Authentication:** Required (Artisan only)
+
+**Request Body:**
+```json
+{
+  "agreed_amount": 7500.00
+}
+```
+
+**Field Requirements:**
+- `agreed_amount`: Required, decimal, must be within budget range (budget_min <= agreed_amount <= budget_max)
+
+**Success Response (200):**
+```json
+{
+  "id": 1,
+  "booking_reference": "BK-2026-000001",
+  "agreed_amount": "7500.00",
+  "status": "accepted",
+  "accepted_at": "2026-02-05T14:05:00Z",
+  ...
+}
+```
+
+**Error Responses:**
+- **400** - Agreed amount outside budget range, or booking not in PENDING status
+- **403** - Only assigned artisan can accept
+- **404** - Booking not found
+
+---
+
+### 6. Reject Booking (Artisan)
+
+**Endpoint:** `PATCH /bookings/{booking_id}/reject`
+
+**Authentication:** Required (Artisan only)
+
+**Request Body:**
+```json
+{
+  "rejection_reason": "Schedule conflict, not available on this date"
+}
+```
+
+**Field Requirements:**
+- `rejection_reason`: Required, string (10-500 characters)
+
+**Success Response (200):**
+```json
+{
+  "id": 1,
+  "booking_reference": "BK-2026-000001",
+  "status": "rejected",
+  "rejection_reason": "Schedule conflict, not available on this date",
+  ...
+}
+```
+
+**Error Responses:**
+- **400** - Booking not in PENDING status
+- **403** - Only assigned artisan can reject
+- **404** - Booking not found
+
+---
+
+### 7. Start Booking (Artisan)
+
+**Endpoint:** `PATCH /bookings/{booking_id}/start`
+
+**Authentication:** Required (Artisan only)
+
+**Request Body:** None
+
+**Success Response (200):**
+```json
+{
+  "id": 1,
+  "booking_reference": "BK-2026-000001",
+  "status": "in_progress",
+  "started_at": "2026-02-15T10:15:00Z",
+  ...
+}
+```
+
+**Error Responses:**
+- **400** - Booking not in PAID status
+- **403** - Only assigned artisan can start
+- **404** - Booking not found
+
+---
+
+### 8. Complete Booking (Artisan)
+
+**Endpoint:** `PATCH /bookings/{booking_id}/complete`
+
+**Authentication:** Required (Artisan only)
+
+**Request Body:**
+```json
+{
+  "completion_notes": "Fixed the electrical wiring and tested all outlets",
+  "completion_images": [
+    "https://res.cloudinary.com/workchop/image/upload/v1234/job1.jpg",
+    "https://res.cloudinary.com/workchop/image/upload/v1234/job2.jpg"
+  ]
+}
+```
+
+**Field Requirements:**
+- `completion_notes`: Optional, string (max 1000 characters)
+- `completion_images`: Optional, array of image URLs (max 10 images)
+
+**Success Response (200):**
+```json
+{
+  "id": 1,
+  "booking_reference": "BK-2026-000001",
+  "status": "completed",
+  "completed_at": "2026-02-15T14:30:00Z",
+  "completion_notes": "Fixed the electrical wiring and tested all outlets",
+  "completion_images": [
+    "https://res.cloudinary.com/workchop/image/upload/v1234/job1.jpg",
+    "https://res.cloudinary.com/workchop/image/upload/v1234/job2.jpg"
+  ],
+  ...
+}
+```
+
+**Error Responses:**
+- **400** - Booking not in IN_PROGRESS status
+- **403** - Only assigned artisan can complete
+- **404** - Booking not found
+
+---
+
+### 9. Cancel Booking (Customer)
+
+**Endpoint:** `PATCH /bookings/{booking_id}/cancel`
+
+**Authentication:** Required (Customer only)
+
+**Request Body:**
+```json
+{
+  "cancellation_reason": "Changed my mind, will book later"
+}
+```
+
+**Field Requirements:**
+- `cancellation_reason`: Required, string (10-500 characters)
+
+**Success Response (200):**
+```json
+{
+  "id": 1,
+  "booking_reference": "BK-2026-000001",
+  "status": "cancelled",
+  "cancelled_at": "2026-02-05T14:10:00Z",
+  "cancellation_reason": "Changed my mind, will book later",
+  ...
+}
+```
+
+**Error Responses:**
+- **400** - Can only cancel bookings in PENDING or ACCEPTED status (before payment)
+- **403** - Only booking owner can cancel
+- **404** - Booking not found
+
+**Notes:**
+- Bookings can only be cancelled before payment
+- For paid bookings, contact support for cancellation and refund
+
+---
+
+## Payment Module
+
+### Overview
+Payments are processed via Paystack payment gateway. The system implements a hold-and-release model where funds are held by Paystack until the job is completed, then released to the artisan.
+
+**Paystack Test Cards:**
+- Success: `4084084084084081`
+- Decline: `4084084084084085`
+
+### 1. Initialize Payment
+
+**Endpoint:** `POST /payments/initialize`
+
+**Authentication:** Required (Customer only)
+
+**Request Body:**
+```json
+{
+  "booking_id": 1
+}
+```
+
+**Field Requirements:**
+- `booking_id`: Required, integer, booking must be in ACCEPTED status
+
+**Success Response (201):**
+```json
+{
+  "id": 1,
+  "payment_reference": "PAY-2026-000001",
+  "booking_id": 1,
+  "authorization_url": "https://checkout.paystack.com/bl99r9sm6q7dndg",
+  "amount": "7500.00",
+  "status": "pending",
+  "created_at": "2026-02-05T14:10:00Z"
+}
+```
+
+**Error Responses:**
+- **400** - Booking not in ACCEPTED status, or payment already exists
+- **403** - Only customer who owns the booking can initialize payment
+- **404** - Booking not found
+- **500** - Paystack API error
+
+**Notes:**
+- Redirect user to `authorization_url` to complete payment
+- After payment, Paystack will send a webhook to update the booking status
+- Customer will be redirected back to your app (configure callback URL in Paystack dashboard)
+
+---
+
+### 2. Verify Payment
+
+**Endpoint:** `GET /payments/verify/{payment_reference}`
+
+**Authentication:** Required
+
+**Success Response (200):**
+```json
+{
+  "payment_reference": "PAY-2026-000001",
+  "status": "success",
+  "amount": "7500.00",
+  "paid": true,
+  "message": "Payment verified successfully"
+}
+```
+
+**Error Responses:**
+- **403** - User doesn't have permission to verify this payment
+- **404** - Payment not found
+- **500** - Paystack verification error
+
+**Notes:**
+- Call this endpoint after user returns from Paystack to confirm payment status
+- If `paid: true`, booking status will be updated to PAID
+
+---
+
+### 3. Get Payment Details
+
+**Endpoint:** `GET /payments/{payment_id}`
+
+**Authentication:** Required
+
+**Success Response (200):**
+```json
+{
+  "id": 1,
+  "payment_reference": "PAY-2026-000001",
+  "paystack_reference": "T1234567890",
+  "booking_id": 1,
+  "authorization_url": "https://checkout.paystack.com/bl99r9sm6q7dndg",
+  "amount": "7500.00",
+  "currency": "NGN",
+  "payment_method": "card",
+  "status": "success",
+  "customer_email": "customer@example.com",
+  "customer_name": "Alice Customer",
+  "paid_at": "2026-02-05T14:15:00Z",
+  "released_at": null,
+  "refunded_at": null,
+  "failed_at": null,
+  "payout_reference": null,
+  "created_at": "2026-02-05T14:10:00Z",
+  "updated_at": "2026-02-05T14:15:00Z"
+}
+```
+
+**Error Responses:**
+- **403** - User doesn't have permission to view this payment
+- **404** - Payment not found
+
+---
+
+### 4. Paystack Webhook
+
+**Endpoint:** `POST /payments/webhook`
+
+**Authentication:** None (signature verification)
+
+**Headers:**
+- `x-paystack-signature`: Webhook signature for verification
+
+**Request Body (Paystack sends):**
+```json
+{
+  "event": "charge.success",
+  "data": {
+    "reference": "PAY-2026-000001",
+    "amount": 750000,
+    "status": "success",
+    "customer": {
+      "email": "customer@example.com"
+    },
+    "channel": "card"
+  }
+}
+```
+
+**Success Response (200):**
+```json
+{
+  "status": "success",
+  "message": "Payment processed"
+}
+```
+
+**Notes:**
+- This endpoint is called by Paystack, not your frontend
+- Configure webhook URL in Paystack dashboard: `https://yourdomain.com/api/v1/payments/webhook`
+- Webhook signature is verified for security
+- Automatically updates booking status to PAID when payment succeeds
+
+---
+
+### 5. Release Payment to Artisan
+
+**Endpoint:** `POST /payments/{payment_id}/release`
+
+**Authentication:** Required (Admin or Artisan)
+
+**Request Body (optional):**
+```json
+{
+  "account_number": "0123456789",
+  "bank_code": "057",
+  "account_name": "John Artisan"
+}
+```
+
+**Success Response (200):**
+```json
+{
+  "id": 1,
+  "payment_reference": "PAY-2026-000001",
+  "status": "released",
+  "released_at": "2026-02-15T15:00:00Z",
+  "payout_reference": "PAYOUT-PAY-2026-000001",
+  ...
+}
+```
+
+**Error Responses:**
+- **400** - Payment not in SUCCESS status, or booking not COMPLETED
+- **403** - Only assigned artisan can release payment
+- **404** - Payment not found
+- **500** - Paystack transfer error
+
+**Notes:**
+- Payment can only be released after job is completed
+- Funds are transferred from Paystack balance to artisan's bank account
+- In production, this should be admin-only or auto-triggered after review period
+
+---
+
+## Review Module
+
+### Overview
+Customers can review artisans after job completion. Reviews automatically update artisan statistics (average rating, total reviews, jobs completed).
+
+### 1. Create Review
+
+**Endpoint:** `POST /reviews`
+
+**Authentication:** Required (Customer only)
+
+**Request Body:**
+```json
+{
+  "booking_id": 1,
+  "rating": 4.5,
+  "review_text": "Excellent service! Very professional and fixed the issue quickly.",
+  "is_anonymous": false
+}
+```
+
+**Field Requirements:**
+- `booking_id`: Required, integer, booking must be COMPLETED
+- `rating`: Required, float (1.0-5.0), in 0.5 increments (1.0, 1.5, 2.0, etc.)
+- `review_text`: Optional, string (max 1000 characters)
+- `is_anonymous`: Optional, boolean (default false)
+
+**Success Response (201):**
+```json
+{
+  "id": 1,
+  "booking_id": 1,
+  "customer_id": "customer-uuid",
+  "artisan_id": "artisan-uuid",
+  "rating": 4.5,
+  "review_text": "Excellent service! Very professional and fixed the issue quickly.",
+  "is_anonymous": false,
+  "is_flagged": false,
+  "artisan_response": null,
+  "artisan_responded_at": null,
+  "customer_name": "Alice Customer",
+  "artisan_name": "John Electrician",
+  "created_at": "2026-02-15T15:30:00Z",
+  "updated_at": "2026-02-15T15:30:00Z"
+}
+```
+
+**Error Responses:**
+- **400** - Booking not completed, or review already exists
+- **403** - Only customer who owns the booking can review
+- **404** - Booking not found
+
+**Notes:**
+- Only one review per booking
+- Rating must be in 0.5 increments (validated)
+- Automatically updates artisan's average_rating and total_ratings in artisan_profile
+
+---
+
+### 2. Get Artisan Reviews
+
+**Endpoint:** `GET /reviews/artisan/{artisan_id}`
+
+**Authentication:** Not required (public)
+
+**Query Parameters:**
+- `page` (optional, default 1): Page number
+- `page_size` (optional, default 20, max 100): Items per page
+
+**Success Response (200):**
+```json
+{
+  "reviews": [
+    {
+      "id": 1,
+      "booking_id": 1,
+      "customer_id": "customer-uuid",
+      "artisan_id": "artisan-uuid",
+      "rating": 4.5,
+      "review_text": "Excellent service!",
+      "is_anonymous": false,
+      "is_flagged": false,
+      "artisan_response": "Thank you for the kind words!",
+      "artisan_responded_at": "2026-02-15T16:00:00Z",
+      "customer_name": "Alice Customer",
+      "artisan_name": "John Electrician",
+      "created_at": "2026-02-15T15:30:00Z",
+      "updated_at": "2026-02-15T16:00:00Z"
+    }
+  ],
+  "total": 25,
+  "average_rating": 4.3,
+  "rating_distribution": {
+    "1": 0,
+    "2": 1,
+    "3": 3,
+    "4": 8,
+    "5": 13
+  }
+}
+```
+
+**Error Responses:**
+- **404** - Artisan not found
+
+**Notes:**
+- Public endpoint, no authentication required
+- Anonymous reviews hide customer_name (returns null)
+- Excludes flagged reviews
+
+---
+
+### 3. Get Review for Booking
+
+**Endpoint:** `GET /reviews/booking/{booking_id}`
+
+**Authentication:** Required
+
+**Success Response (200):**
+```json
+{
+  "id": 1,
+  "booking_id": 1,
+  "customer_id": "customer-uuid",
+  "artisan_id": "artisan-uuid",
+  "rating": 4.5,
+  "review_text": "Excellent service!",
+  "is_anonymous": false,
+  "is_flagged": false,
+  "artisan_response": "Thank you!",
+  "artisan_responded_at": "2026-02-15T16:00:00Z",
+  "customer_name": "Alice Customer",
+  "artisan_name": "John Electrician",
+  "created_at": "2026-02-15T15:30:00Z",
+  "updated_at": "2026-02-15T16:00:00Z"
+}
+```
+
+**Error Responses:**
+- **403** - User doesn't have permission to view this review
+- **404** - Booking or review not found
+
+---
+
+### 4. Respond to Review (Artisan)
+
+**Endpoint:** `PATCH /reviews/{review_id}/respond`
+
+**Authentication:** Required (Artisan only)
+
+**Request Body:**
+```json
+{
+  "artisan_response": "Thank you for the kind words! It was a pleasure working with you."
+}
+```
+
+**Field Requirements:**
+- `artisan_response`: Required, string (10-500 characters)
+
+**Success Response (200):**
+```json
+{
+  "id": 1,
+  "booking_id": 1,
+  "rating": 4.5,
+  "review_text": "Excellent service!",
+  "artisan_response": "Thank you for the kind words! It was a pleasure working with you.",
+  "artisan_responded_at": "2026-02-15T16:00:00Z",
+  ...
+}
+```
+
+**Error Responses:**
+- **403** - Only the reviewed artisan can respond
+- **404** - Review not found
+
+---
+
+### 5. Get Artisan Review Statistics
+
+**Endpoint:** `GET /reviews/artisan/{artisan_id}/stats`
+
+**Authentication:** Not required (public)
+
+**Success Response (200):**
+```json
+{
+  "artisan_id": "artisan-uuid",
+  "total_reviews": 25,
+  "average_rating": 4.3,
+  "rating_distribution": {
+    "1": 0,
+    "2": 1,
+    "3": 3,
+    "4": 8,
+    "5": 13
+  },
+  "total_jobs_completed": 30
+}
+```
+
+**Error Responses:**
+- **404** - Artisan not found
+
+---
+
+## Additional Notes for Frontend Implementation
+
+### Booking, Payment & Review Module
+
+18. **Booking References:** Format is "BK-YYYY-NNNNNN" (e.g., BK-2026-000001)
+19. **Payment References:** Format is "PAY-YYYY-NNNNNN" (e.g., PAY-2026-000001)
+20. **Decimal Values:** All money fields (budget, agreed_amount, amount) are returned as strings (e.g., "7500.00")
+21. **Coordinates:** Job location uses PostGIS POINT, latitude and longitude are extracted separately
+22. **Completion Images:** Stored as JSON array, parsed automatically in responses
+23. **Status Checks:** Always verify booking status before allowing actions (e.g., can't start an unpaid booking)
+24. **Paystack Integration:** Test with Paystack test keys and test cards before going live
+25. **Review Ratings:** Must be in 0.5 increments (1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0)
+26. **Webhook Security:** Paystack webhooks are signature-verified (HMAC SHA512)
+27. **Anonymous Reviews:** When is_anonymous is true, customer_name returns null
+28. **Payment Flow:** Customer → Paystack checkout → Webhook updates status → Artisan gets notified
+29. **Cancellation Policy:** Bookings can only be cancelled before payment (PENDING or ACCEPTED status)
+30. **Review Period:** Reviews can only be created after booking status is COMPLETED
+
+### Wallet Module
+
+31. **Artisan Only:** All wallet endpoints require artisan authentication
+32. **Real-Time Balance:** Wallet balance is calculated dynamically from payment records, not stored separately
+33. **Pending vs Released:** Pending shows funds held in escrow (SUCCESS status), Released shows actual payouts (RELEASED status)
+34. **No Separate Wallet Table:** Wallet data is derived from Payment and Booking tables
+35. **Payment Flow:** Customer pays → SUCCESS (held by Paystack) → Job completed → RELEASED (paid to artisan)
+36. **Earnings History:** Shows all payments with full booking context for easy tracking
+37. **Payout History:** Shows only completed payouts that artisan has received
+38. **Stats Calculation:** Only includes successful and released payments in statistics
+39. **Minimum Payout:** ₦5,000 minimum payout amount enforced
+40. **Payout Request:** Artisans can request withdrawal of available balance to their bank account
+41. **Bank Verification:** Bank accounts are verified via Paystack before processing payouts
+42. **Payout Processing:** Payments are released in chronological order to fulfill requested amount
+43. **Available Balance:** Only SUCCESS status payments (paid but not yet released) can be withdrawn
+44. **Bank Codes:** Use official Nigerian bank codes (057 for Zenith, 044 for Access, etc.)
 
 ---
 
 ## TODO / Coming Soon
 
 - Google OAuth implementation
-- Booking system endpoints
-- Payment integration endpoints
 - Chat messaging endpoints
 - Push notifications endpoints
+- Admin endpoints for managing bookings/disputes
 
 ---
 
-**Last Updated:** 2026-01-30
+**Last Updated:** 2026-02-05
 **API Version:** v1

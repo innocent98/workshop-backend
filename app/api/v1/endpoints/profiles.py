@@ -41,7 +41,18 @@ def get_my_customer_profile(
     Get current user's customer profile.
     Available to all users (customers and artisans).
     """
-    return current_user
+    # Manually build response to convert UUID to string
+    return {
+        "id": str(current_user.id),
+        "full_name": current_user.full_name,
+        "email": current_user.email,
+        "phone_number": current_user.phone_number,
+        "profile_picture_url": current_user.profile_picture_url,
+        "bio": current_user.bio,
+        "is_email_verified": current_user.is_email_verified,
+        "is_active": current_user.is_active,
+        "created_at": current_user.created_at,
+    }
 
 
 @router.put("/customers/me", response_model=CustomerProfileResponse)
@@ -76,7 +87,19 @@ def update_my_customer_profile(
         db.refresh(current_user)
 
         logger.info(f"Customer profile updated for user {current_user.id}")
-        return current_user
+
+        # Manually build response to convert UUID to string
+        return {
+            "id": str(current_user.id),
+            "full_name": current_user.full_name,
+            "email": current_user.email,
+            "phone_number": current_user.phone_number,
+            "profile_picture_url": current_user.profile_picture_url,
+            "bio": current_user.bio,
+            "is_email_verified": current_user.is_email_verified,
+            "is_active": current_user.is_active,
+            "created_at": current_user.created_at,
+        }
 
     except HTTPException:
         raise
