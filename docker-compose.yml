@@ -121,7 +121,11 @@ services:
       - ./app:/app/app
     env_file:
       - .env
+    environment:
+      - SKIP_MIGRATIONS=true
     depends_on:
+      api:
+        condition: service_healthy
       db:
         condition: service_healthy
       redis:
@@ -153,7 +157,11 @@ services:
       - ./app:/app/app
     env_file:
       - .env
+    environment:
+      - SKIP_MIGRATIONS=true
     depends_on:
+      api:
+        condition: service_healthy
       db:
         condition: service_healthy
       redis:
