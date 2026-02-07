@@ -204,6 +204,29 @@ class ForgotPasswordResetResponse(BaseModel):
 
 
 # ============================================================================
+# AUTHENTICATED PASSWORD CHANGE SCHEMAS
+# ============================================================================
+
+class ChangePasswordRequest(BaseModel):
+    """Change password for authenticated user"""
+    current_password: str = Field(..., min_length=1)
+    new_password: str = Field(..., min_length=8)
+    confirm_password: str = Field(..., min_length=8)
+
+    @field_validator('confirm_password')
+    @classmethod
+    def passwords_match(cls, v: str, info) -> str:
+        if 'new_password' in info.data and v != info.data['new_password']:
+            raise ValueError('Passwords must match')
+        return v
+
+
+class ChangePasswordResponse(BaseModel):
+    success: bool = True
+    message: str
+
+
+# ============================================================================
 # RESEND OTP SCHEMA
 # ============================================================================
 

@@ -97,3 +97,25 @@ class RequestPayoutResponse(BaseModel):
     account_number: str
     bank_code: str
     status: str
+
+
+class BankItemResponse(BaseModel):
+    """Response schema for a supported bank"""
+    name: str
+    code: str
+    slug: Optional[str] = None
+
+
+class VerifyAccountRequest(BaseModel):
+    """Request schema for verifying bank account details"""
+    account_number: str
+    bank_code: str
+
+
+class VerifyAccountResponse(BaseModel):
+    """Response schema for verified bank account"""
+    account_number: str
+    account_name: str
+    bank_code: str
+    bank_name: Optional[str] = None
+    verified: bool = True

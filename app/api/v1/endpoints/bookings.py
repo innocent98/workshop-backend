@@ -3,7 +3,7 @@ Booking endpoints for managing service bookings.
 """
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, or_
 from geoalchemy2.elements import WKTElement
 import json
@@ -66,6 +66,14 @@ def _booking_to_response(booking: Booking, db: Session) -> dict:
         "customer_id": booking.customer_id,
         "artisan_id": booking.artisan_id,
         "service_id": booking.service_id,
+        "customer_name": booking.customer.full_name if booking.customer else None,
+        "customer_profile_picture_url": booking.customer.profile_picture_url if booking.customer else None,
+        "customer_phone_number": booking.customer.phone_number if booking.customer else None,
+        "artisan_name": booking.artisan.full_name if booking.artisan else None,
+        "artisan_profile_picture_url": booking.artisan.profile_picture_url if booking.artisan else None,
+        "artisan_phone_number": booking.artisan.phone_number if booking.artisan else None,
+        "service_name": booking.service.name if booking.service else None,
+        "service_image": booking.service.image if booking.service else None,
         "job_description": booking.job_description,
         "job_date": booking.job_date,
         "job_address": booking.job_address,
@@ -171,9 +179,17 @@ async def list_bookings(
     """
     # Base query based on user type
     if current_user.user_type == UserType.CLIENT:
-        query = db.query(Booking).filter(Booking.customer_id == current_user.id)
+        query = db.query(Booking).options(
+            joinedload(Booking.customer),
+            joinedload(Booking.artisan),
+            joinedload(Booking.service),
+        ).filter(Booking.customer_id == current_user.id)
     else:
-        query = db.query(Booking).filter(Booking.artisan_id == current_user.id)
+        query = db.query(Booking).options(
+            joinedload(Booking.customer),
+            joinedload(Booking.artisan),
+            joinedload(Booking.service),
+        ).filter(Booking.artisan_id == current_user.id)
 
     # Apply status filter
     if status_filter:
@@ -243,7 +259,11 @@ async def get_booking(
 
     Only customer or artisan involved in the booking can view it.
     """
-    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    booking = db.query(Booking).options(
+        joinedload(Booking.customer),
+        joinedload(Booking.artisan),
+        joinedload(Booking.service),
+    ).filter(Booking.id == booking_id).first()
     if not booking:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

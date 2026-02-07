@@ -21,6 +21,9 @@ from app.schemas.wallet import (
     EarningsHistoryResponse,
     PayoutItemResponse,
     PayoutsHistoryResponse,
+    BankItemResponse,
+    VerifyAccountRequest,
+    VerifyAccountResponse,
     RequestPayoutRequest,
     RequestPayoutResponse,
 )
@@ -28,6 +31,78 @@ from app.services.paystack import PaystackService, PaystackError
 
 
 router = APIRouter()
+
+
+@router.get("/banks", response_model=list[BankItemResponse])
+async def get_supported_banks(
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Get supported Nigerian banks for payout.
+
+    Only artisans can access wallet-related endpoints.
+    """
+    if current_user.user_type != UserType.ARTISAN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only artisans have wallet access"
+        )
+
+    try:
+        banks = PaystackService.get_banks()
+    except PaystackError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch banks: {str(e)}"
+        )
+
+    bank_items = []
+    for bank in banks:
+        bank_items.append({
+            "name": bank.get("name", ""),
+            "code": bank.get("code", ""),
+            "slug": bank.get("slug"),
+        })
+
+    # Return a stable, user-friendly order
+    bank_items.sort(key=lambda item: item["name"].lower())
+    return bank_items
+
+
+@router.post("/account/verify", response_model=VerifyAccountResponse)
+async def verify_bank_account(
+    request: VerifyAccountRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Verify bank account details before payout request.
+
+    Only artisans can access wallet-related endpoints.
+    """
+    if current_user.user_type != UserType.ARTISAN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only artisans have wallet access"
+        )
+
+    try:
+        verification = PaystackService.verify_account_number(
+            account_number=request.account_number,
+            bank_code=request.bank_code
+        )
+    except PaystackError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+    return {
+        "account_number": verification.get("account_number", request.account_number),
+        "account_name": verification.get("account_name", ""),
+        "bank_code": request.bank_code,
+        "bank_name": verification.get("bank_name"),
+        "verified": True,
+    }
 
 
 @router.get("/balance", response_model=WalletBalanceResponse)

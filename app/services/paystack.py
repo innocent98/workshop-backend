@@ -317,8 +317,11 @@ class PaystackService:
                 headers=cls._get_headers(),
                 timeout=30
             )
-            response.raise_for_status()
             data = response.json()
+
+            if response.status_code >= 400:
+                error_message = data.get("message", "Account verification failed")
+                raise PaystackError(error_message)
 
             if not data.get("status"):
                 raise PaystackError(data.get("message", "Account verification failed"))

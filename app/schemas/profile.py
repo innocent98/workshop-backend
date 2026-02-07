@@ -58,6 +58,9 @@ class ArtisanProfileCreate(ArtisanProfileBase):
 
 class ArtisanProfileUpdate(BaseModel):
     """Schema for updating artisan profile"""
+    full_name: Optional[str] = Field(None, min_length=1, max_length=255)
+    phone_number: Optional[str] = Field(None, min_length=10, max_length=20)
+    bio: Optional[str] = Field(None, max_length=1000)
     location: Optional[LocationInput] = None
     location_address: Optional[str] = Field(None, max_length=500)
     service_radius_km: Optional[float] = Field(None, ge=1, le=100)
@@ -163,3 +166,9 @@ class ArtisanSearchResult(ArtisanPublicProfileResponse):
 
     class Config:
         from_attributes = True
+
+
+class ProfilePictureResponse(BaseModel):
+    """Schema for profile picture upload/update response"""
+    message: str
+    profile_picture_url: str

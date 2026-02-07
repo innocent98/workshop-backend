@@ -490,6 +490,41 @@ None (empty body)
 
 ---
 
+#### Change Password (Authenticated)
+
+**Endpoint:** `POST /auth/change-password`
+
+**Headers:**
+- `Authorization`: Required, Bearer token
+
+**Request Body:**
+```json
+{
+  "current_password": "OldPassword123!",
+  "new_password": "NewSecurePass123!",
+  "confirm_password": "NewSecurePass123!"
+}
+```
+
+**Field Requirements:**
+- `current_password`: Required
+- `new_password`: Required, minimum 8 characters
+- `confirm_password`: Required, must match `new_password`
+
+**Success Response (200):**
+```json
+{
+  "success": true,
+  "message": "Password changed successfully"
+}
+```
+
+**Error Responses:**
+- **400** - Current password incorrect, unchanged password, or validation failure
+- **401** - Unauthorized
+
+---
+
 ### 4. Utility Endpoints
 
 #### Resend OTP
@@ -886,6 +921,32 @@ Available to all authenticated users (both customers and artisans can access the
 
 ---
 
+#### Upload / Change Profile Picture
+
+**Endpoint:** `PUT /profiles/me/profile-picture`
+
+**Headers:**
+- `Authorization`: Required, Bearer token
+- `Content-Type`: `multipart/form-data`
+
+**Form Data:**
+- `profile_picture`: Required, image file (`jpg`, `jpeg`, `png`, `webp`, `gif`)
+
+**Success Response (200):**
+```json
+{
+  "message": "Profile picture updated successfully",
+  "profile_picture_url": "https://res.cloudinary.com/workchop/image/upload/v1234567890/profile_pictures/123e4567_a1b2c3d4.jpg"
+}
+```
+
+**Error Responses:**
+- **400** - Invalid/unsupported image
+- **401** - Unauthorized
+- **500** - Failed to update profile picture
+
+---
+
 ### Artisan Profile Endpoints
 
 Only available to users with `user_type: "artisan"`.
@@ -989,6 +1050,9 @@ Only available to users with `user_type: "artisan"`.
 ```
 
 **Field Requirements:**
+- `full_name`: Optional, string (1-255 characters)
+- `phone_number`: Optional, string (10-20 characters), must be unique
+- `bio`: Optional, string (max 1000 characters)
 - `location`: Optional, object with:
   - `latitude`: Required if location provided, number (-90 to 90)
   - `longitude`: Required if location provided, number (-180 to 180)
@@ -1030,6 +1094,7 @@ Returns full artisan profile (same format as GET /profiles/artisans/me):
 ```
 
 **Error Responses:**
+- **400** - Phone number already registered
 - **403** - Only artisans can access this endpoint
 - **422** - Validation error (e.g., hourly_rate_max < hourly_rate_min)
 - **500** - Failed to update profile
@@ -1672,7 +1737,7 @@ The wallet module allows artisans to track their earnings, view payment history,
 **Authentication:** Required (Artisan only)
 
 **Query Parameters:**
-- `status` (optional): Filter by payment status (pending, success, released, etc.)
+- `status_filter` (optional): Filter by payment status (pending, success, released, etc.)
 - `page` (optional, default 1): Page number
 - `page_size` (optional, default 20, max 100): Items per page
 
@@ -1792,7 +1857,74 @@ The wallet module allows artisans to track their earnings, view payment history,
 
 ---
 
-### 5. Request Payout
+### 5. Get Supported Banks
+
+**Endpoint:** `GET /wallet/banks`
+
+**Authentication:** Required (Artisan only)
+
+**Success Response (200):**
+```json
+[
+  {
+    "name": "Access Bank",
+    "code": "044",
+    "slug": "access-bank"
+  },
+  {
+    "name": "Zenith Bank",
+    "code": "057",
+    "slug": "zenith-bank"
+  }
+]
+```
+
+**Error Responses:**
+- **403** - Only artisans can access wallet
+- **500** - Failed to fetch banks from Paystack
+
+**Notes:**
+- Returns Paystack-supported banks, sorted alphabetically by name
+- Use this endpoint to populate bank dropdowns
+
+---
+
+### 6. Verify Bank Account
+
+**Endpoint:** `POST /wallet/account/verify`
+
+**Authentication:** Required (Artisan only)
+
+**Request Body:**
+```json
+{
+  "account_number": "0123456789",
+  "bank_code": "057"
+}
+```
+
+**Success Response (200):**
+```json
+{
+  "account_number": "0123456789",
+  "account_name": "JOHN ARTISAN",
+  "bank_code": "057",
+  "bank_name": "Zenith Bank",
+  "verified": true
+}
+```
+
+**Error Responses:**
+- **400** - Account verification failed
+- **403** - Only artisans can access wallet
+
+**Notes:**
+- Use this before payout submission to auto-fill/confirm account name
+- Verification is done against Paystack `bank/resolve`
+
+---
+
+### 7. Request Payout
 
 **Endpoint:** `POST /wallet/payout/request`
 

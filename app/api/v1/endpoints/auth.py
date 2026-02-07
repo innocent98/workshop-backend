@@ -33,6 +33,8 @@ from app.schemas.auth import (
     ForgotPasswordVerifyCodeResponse,
     ForgotPasswordResetRequest,
     ForgotPasswordResetResponse,
+    ChangePasswordRequest,
+    ChangePasswordResponse,
     ResendOTPRequest,
     ResendOTPResponse,
     LogoutResponse,
@@ -350,6 +352,31 @@ def forgot_password_reset(
 
     return ForgotPasswordResetResponse(
         message="Password reset successfully",
+    )
+
+
+@router.post(
+    "/change-password",
+    response_model=ChangePasswordResponse,
+    summary="Change Password",
+)
+def change_password(
+    body: ChangePasswordRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Change password for authenticated user.
+    """
+    AuthService.change_password(
+        db=db,
+        user=current_user,
+        current_password=body.current_password,
+        new_password=body.new_password,
+    )
+
+    return ChangePasswordResponse(
+        message="Password changed successfully",
     )
 
 

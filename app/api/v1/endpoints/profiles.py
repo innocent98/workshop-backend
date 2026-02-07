@@ -21,6 +21,7 @@ from app.schemas.profile import (
     ArtisanStatsResponse,
     ArtisanPublicProfileResponse,
     LocationInput,
+    ProfilePictureResponse,
 )
 from app.schemas.portfolio import PortfolioResponse, PortfolioCreate, PortfolioUpdate
 from app.utils.file_upload import save_profile_picture, save_portfolio_image, delete_image
@@ -188,6 +189,24 @@ def update_my_artisan_profile(
         )
 
     try:
+        if profile_update.full_name is not None:
+            current_user.full_name = profile_update.full_name
+
+        if profile_update.phone_number is not None:
+            existing = db.query(User).filter(
+                User.phone_number == profile_update.phone_number,
+                User.id != current_user.id
+            ).first()
+            if existing:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Phone number already registered"
+                )
+            current_user.phone_number = profile_update.phone_number
+
+        if profile_update.bio is not None:
+            current_user.bio = profile_update.bio
+
         # Get or create artisan profile
         artisan_profile = db.query(ArtisanProfile).filter(
             ArtisanProfile.user_id == current_user.id
@@ -267,6 +286,48 @@ def update_my_artisan_profile(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update artisan profile"
+        )
+
+
+@router.put("/me/profile-picture", response_model=ProfilePictureResponse)
+async def update_profile_picture(
+    profile_picture: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Upload or replace current user's profile picture.
+    Available to all authenticated users.
+    """
+    try:
+        previous_url = current_user.profile_picture_url
+        image_url = await save_profile_picture(profile_picture, str(current_user.id))
+        if not image_url:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to upload profile picture"
+            )
+
+        current_user.profile_picture_url = image_url
+        db.commit()
+        db.refresh(current_user)
+
+        if previous_url and previous_url != image_url:
+            await delete_image(previous_url)
+
+        logger.info(f"Profile picture updated for user {current_user.id}")
+        return {
+            "message": "Profile picture updated successfully",
+            "profile_picture_url": image_url,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error updating profile picture: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update profile picture"
         )
 
 

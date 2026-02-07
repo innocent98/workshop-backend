@@ -112,6 +112,14 @@ class BookingResponse(BaseModel):
     customer_id: UUID
     artisan_id: UUID
     service_id: int
+    customer_name: Optional[str] = None
+    customer_profile_picture_url: Optional[str] = None
+    customer_phone_number: Optional[str] = None
+    artisan_name: Optional[str] = None
+    artisan_profile_picture_url: Optional[str] = None
+    artisan_phone_number: Optional[str] = None
+    service_name: Optional[str] = None
+    service_image: Optional[str] = None
     job_description: Optional[str]
     job_date: datetime
     job_address: str
