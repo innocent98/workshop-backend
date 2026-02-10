@@ -2,10 +2,14 @@
 Location and geography utility functions using PostGIS.
 """
 from typing import Tuple, List, Optional
+import httpx
 from geoalchemy2 import Geometry
 from geoalchemy2.functions import ST_DWithin, ST_Distance, ST_MakePoint, ST_SetSRID
 from sqlalchemy import cast, Float
 from sqlalchemy.sql import func
+
+from app.core.config import settings
+from app.core.logger import logger
 
 
 def create_point(latitude: float, longitude: float) -> str:
@@ -228,4 +232,68 @@ def get_city_coordinates(city_name: str) -> Optional[Tuple[float, float]]:
     city = NIGERIAN_CITIES.get(city_name.lower().replace(" ", "_"))
     if city:
         return (city["lat"], city["lng"])
+    return None
+
+
+def resolve_location_label(latitude: float, longitude: float) -> Optional[str]:
+    """
+    Best-effort reverse geocoding for area/state-style labels.
+
+    Returns a compact human-friendly label such as:
+    - "Ikeja, Lagos"
+    - "Lagos, Lagos State"
+    - "Lagos State, Nigeria"
+    """
+    if not settings.REVERSE_GEOCODE_ENABLED:
+        return None
+
+    url = f"{settings.NOMINATIM_BASE_URL.rstrip('/')}/reverse"
+    params = {
+        "lat": latitude,
+        "lon": longitude,
+        "format": "jsonv2",
+        "addressdetails": 1,
+        "zoom": 10,  # Prefer city/LGA/state level, not street-level detail
+    }
+    headers = {
+        "User-Agent": settings.NOMINATIM_USER_AGENT,
+        "Accept": "application/json",
+    }
+
+    try:
+        with httpx.Client(timeout=4.0, follow_redirects=True) as client:
+            response = client.get(url, params=params, headers=headers)
+            response.raise_for_status()
+            payload = response.json()
+
+        address = payload.get("address") or {}
+        area = (
+            address.get("suburb")
+            or address.get("city_district")
+            or address.get("town")
+            or address.get("city")
+            or address.get("county")
+        )
+        state = address.get("state")
+        country = address.get("country")
+
+        if area and state:
+            return f"{area}, {state}"
+        if area:
+            return area
+        if state and country:
+            return f"{state}, {country}"
+        if state:
+            return state
+        if country:
+            return country
+
+        display_name = payload.get("display_name")
+        if isinstance(display_name, str) and display_name.strip():
+            # Keep only broader area by trimming after first two comma-separated parts.
+            parts = [p.strip() for p in display_name.split(",") if p.strip()]
+            return ", ".join(parts[:2]) if parts else None
+    except Exception as exc:
+        logger.warning(f"Reverse geocoding failed for {latitude},{longitude}: {exc}")
+
     return None

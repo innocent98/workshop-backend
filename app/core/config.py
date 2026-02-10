@@ -69,6 +69,11 @@ class Settings(BaseSettings):
     PAYSTACK_WEBHOOK_SECRET: Optional[str] = None
     PAYSTACK_BASE_URL: str = "https://api.paystack.co"
 
+    # Reverse Geocoding
+    REVERSE_GEOCODE_ENABLED: bool = True
+    NOMINATIM_BASE_URL: str = "https://nominatim.openstreetmap.org"
+    NOMINATIM_USER_AGENT: str = "workchop-api/1.0"
+
     # Admin
     FIRST_SUPERUSER_EMAIL: EmailStr
     FIRST_SUPERUSER_PASSWORD: str

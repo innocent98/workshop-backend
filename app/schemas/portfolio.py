@@ -4,6 +4,7 @@ Pydantic schemas for Artisan Portfolio.
 from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime
+from uuid import UUID
 
 
 class PortfolioBase(BaseModel):
@@ -30,7 +31,7 @@ class PortfolioUpdate(BaseModel):
 class PortfolioResponse(PortfolioBase):
     """Schema for portfolio response"""
     id: int
-    artisan_id: str  # User UUID
+    artisan_id: UUID
     image_url: str
     created_at: datetime
 

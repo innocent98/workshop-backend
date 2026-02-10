@@ -11,6 +11,7 @@ from app.db.session import get_db
 from app.db.models.user import User, UserType
 from app.db.models.artisan_profile import ArtisanProfile, AvailabilityStatus
 from app.db.models.portfolio import Portfolio
+from app.db.models.service import Service, UserService
 from app.api.deps import get_current_user
 from app.schemas.profile import (
     CustomerProfileResponse,
@@ -22,13 +23,29 @@ from app.schemas.profile import (
     ArtisanPublicProfileResponse,
     LocationInput,
     ProfilePictureResponse,
+    ArtisanServiceSelectionUpdate,
+    ArtisanServiceSelectionResponse,
 )
 from app.schemas.portfolio import PortfolioResponse, PortfolioCreate, PortfolioUpdate
 from app.utils.file_upload import save_profile_picture, save_portfolio_image, delete_image
+from app.utils.location import resolve_location_label
 from app.core.logger import logger
 
 
 router = APIRouter()
+
+
+def _format_coordinates_address(latitude: float, longitude: float) -> str:
+    """Build a readable fallback address from coordinates."""
+    return f"{latitude:.5f}, {longitude:.5f}"
+
+
+def _resolve_address_or_fallback(latitude: float, longitude: float) -> str:
+    """Resolve a human-readable area/state label; fallback to coordinates."""
+    resolved = resolve_location_label(latitude, longitude)
+    if resolved and resolved.strip():
+        return resolved.strip()
+    return _format_coordinates_address(latitude, longitude)
 
 
 # ==================== Customer Profile Endpoints ====================
@@ -50,6 +67,9 @@ def get_my_customer_profile(
         "phone_number": current_user.phone_number,
         "profile_picture_url": current_user.profile_picture_url,
         "bio": current_user.bio,
+        "location_address": current_user.location_address,
+        "location_latitude": current_user.location_latitude,
+        "location_longitude": current_user.location_longitude,
         "is_email_verified": current_user.is_email_verified,
         "is_active": current_user.is_active,
         "created_at": current_user.created_at,
@@ -83,6 +103,18 @@ def update_my_customer_profile(
             current_user.phone_number = profile_update.phone_number
         if profile_update.bio is not None:
             current_user.bio = profile_update.bio
+        if profile_update.location is not None:
+            current_user.location_latitude = profile_update.location.latitude
+            current_user.location_longitude = profile_update.location.longitude
+            current_user.location_address = (
+                profile_update.location.address
+                or _resolve_address_or_fallback(
+                    profile_update.location.latitude,
+                    profile_update.location.longitude,
+                )
+            )
+        if profile_update.location_address is not None:
+            current_user.location_address = profile_update.location_address
 
         db.commit()
         db.refresh(current_user)
@@ -97,6 +129,9 @@ def update_my_customer_profile(
             "phone_number": current_user.phone_number,
             "profile_picture_url": current_user.profile_picture_url,
             "bio": current_user.bio,
+            "location_address": current_user.location_address,
+            "location_latitude": current_user.location_latitude,
+            "location_longitude": current_user.location_longitude,
             "is_email_verified": current_user.is_email_verified,
             "is_active": current_user.is_active,
             "created_at": current_user.created_at,
@@ -230,6 +265,11 @@ def update_my_artisan_profile(
 
             if profile_update.location.address:
                 artisan_profile.location_address = profile_update.location.address
+            else:
+                artisan_profile.location_address = _resolve_address_or_fallback(
+                    profile_update.location.latitude,
+                    profile_update.location.longitude,
+                )
 
         # Update other fields
         if profile_update.location_address is not None:
@@ -430,6 +470,96 @@ def get_my_artisan_stats(
         )
 
     return artisan_profile
+
+
+@router.get(
+    "/artisans/me/services",
+    response_model=List[ArtisanServiceSelectionResponse],
+)
+def get_my_artisan_services(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Get selected services for current artisan.
+    Only available to artisans.
+    """
+    if current_user.user_type != UserType.ARTISAN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only artisans can access this endpoint",
+        )
+
+    services = (
+        db.query(Service)
+        .join(UserService, UserService.service_id == Service.id)
+        .filter(UserService.user_id == current_user.id)
+        .order_by(Service.name)
+        .all()
+    )
+    return services
+
+
+@router.put(
+    "/artisans/me/services",
+    response_model=List[ArtisanServiceSelectionResponse],
+)
+def update_my_artisan_services(
+    payload: ArtisanServiceSelectionUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Replace selected services for current artisan.
+    Only available to artisans.
+    """
+    if current_user.user_type != UserType.ARTISAN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only artisans can access this endpoint",
+        )
+
+    try:
+        requested_ids = list(dict.fromkeys(payload.service_ids))
+
+        services = db.query(Service).filter(Service.id.in_(requested_ids)).all()
+        found_ids = {service.id for service in services}
+        missing_ids = [sid for sid in requested_ids if sid not in found_ids]
+        if missing_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid service IDs: {missing_ids}",
+            )
+
+        db.query(UserService).filter(UserService.user_id == current_user.id).delete()
+
+        for service_id in requested_ids:
+            db.add(UserService(user_id=current_user.id, service_id=service_id))
+
+        db.commit()
+
+        updated_services = (
+            db.query(Service)
+            .join(UserService, UserService.service_id == Service.id)
+            .filter(UserService.user_id == current_user.id)
+            .order_by(Service.name)
+            .all()
+        )
+
+        logger.info(
+            f"Updated artisan services for user {current_user.id}: {requested_ids}"
+        )
+        return updated_services
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error updating artisan services: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update artisan services",
+        )
 
 
 @router.get("/artisans/{artisan_id}", response_model=ArtisanPublicProfileResponse)

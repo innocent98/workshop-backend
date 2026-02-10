@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, String, Boolean, DateTime, Text, Enum as SQLEnum
+from sqlalchemy import Column, String, Boolean, DateTime, Text, Enum as SQLEnum, Float
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -35,6 +35,9 @@ class User(Base):
     # Profile (Step 5)
     profile_picture_url = Column(String(500), nullable=True)
     bio = Column(Text, nullable=True)
+    location_address = Column(String(500), nullable=True)
+    location_latitude = Column(Float, nullable=True)
+    location_longitude = Column(Float, nullable=True)
 
     # OAuth
     google_id = Column(String(255), unique=True, nullable=True, index=True)

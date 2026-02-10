@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from fastapi import HTTPException, status, UploadFile
 
 from app.db.models.user import User, UserType
+from app.db.models.artisan_profile import ArtisanProfile
 from app.db.models.otp import OTP, OTPType
 from app.db.models.service import Service, UserService
 from app.db.models.password_reset import PasswordResetToken
@@ -192,6 +193,20 @@ class AuthService:
 
         # Mark email as verified
         user.is_email_verified = True
+
+        # Temporary rule: once email is verified, auto-verify artisan profile.
+        # This can be replaced later with stricter KYC/face-verification flow.
+        if user.user_type == UserType.ARTISAN:
+            artisan_profile = db.query(ArtisanProfile).filter(
+                ArtisanProfile.user_id == user.id
+            ).first()
+            if not artisan_profile:
+                artisan_profile = ArtisanProfile(user_id=user.id)
+                db.add(artisan_profile)
+
+            if not artisan_profile.is_verified:
+                artisan_profile.is_verified = True
+                artisan_profile.verified_at = datetime.now(timezone.utc)
 
         db.commit()
         db.refresh(user)

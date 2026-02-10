@@ -9,6 +9,13 @@ from decimal import Decimal
 from app.db.models.artisan_profile import AvailabilityStatus
 
 
+class CustomerLocationInput(BaseModel):
+    """Schema for customer location input"""
+    latitude: float = Field(..., ge=-90, le=90, description="Latitude coordinate")
+    longitude: float = Field(..., ge=-180, le=180, description="Longitude coordinate")
+    address: Optional[str] = Field(None, max_length=500, description="Human-readable address")
+
+
 # Customer Profile Schemas
 class CustomerProfileResponse(BaseModel):
     """Schema for customer profile response"""
@@ -18,6 +25,9 @@ class CustomerProfileResponse(BaseModel):
     phone_number: str
     profile_picture_url: Optional[str] = None
     bio: Optional[str] = None
+    location_address: Optional[str] = None
+    location_latitude: Optional[float] = None
+    location_longitude: Optional[float] = None
     is_email_verified: bool
     is_active: bool
     created_at: datetime
@@ -31,6 +41,8 @@ class CustomerProfileUpdate(BaseModel):
     full_name: Optional[str] = Field(None, min_length=1, max_length=255)
     phone_number: Optional[str] = Field(None, min_length=10, max_length=20)
     bio: Optional[str] = Field(None, max_length=1000)
+    location: Optional[CustomerLocationInput] = None
+    location_address: Optional[str] = Field(None, max_length=500)
 
 
 # Artisan Profile Schemas
@@ -172,3 +184,19 @@ class ProfilePictureResponse(BaseModel):
     """Schema for profile picture upload/update response"""
     message: str
     profile_picture_url: str
+
+
+class ArtisanServiceSelectionUpdate(BaseModel):
+    """Schema for replacing artisan selected services"""
+    service_ids: List[int] = Field(..., min_length=1)
+
+
+class ArtisanServiceSelectionResponse(BaseModel):
+    """Schema for artisan selected service response"""
+    id: int
+    name: str
+    description: Optional[str] = None
+    image: Optional[str] = None
+
+    class Config:
+        from_attributes = True

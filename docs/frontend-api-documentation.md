@@ -856,6 +856,9 @@ Available to all authenticated users (both customers and artisans can access the
   "phone_number": "08012345678",
   "profile_picture_url": "https://res.cloudinary.com/workchop/image/upload/v1234567890/profile_pictures/123e4567_a1b2c3d4.jpg",
   "bio": "Looking for reliable artisans",
+  "location_address": "6.52440, 3.37920",
+  "location_latitude": 6.5244,
+  "location_longitude": 3.3792,
   "is_email_verified": true,
   "is_active": true,
   "created_at": "2025-01-20T10:00:00Z"
@@ -869,6 +872,9 @@ Available to all authenticated users (both customers and artisans can access the
 - `phone_number`: User's phone number (string)
 - `profile_picture_url`: Cloudinary image URL or null (string or null)
 - `bio`: User biography (string or null)
+- `location_address`: User location address/label (string or null)
+- `location_latitude`: User latitude coordinate (number or null)
+- `location_longitude`: User longitude coordinate (number or null)
 - `is_email_verified`: Email verification status (boolean)
 - `is_active`: Account active status (boolean)
 - `created_at`: Account creation timestamp (ISO 8601 datetime string)
@@ -890,7 +896,13 @@ Available to all authenticated users (both customers and artisans can access the
 {
   "full_name": "Jane Smith Updated",
   "phone_number": "08087654321",
-  "bio": "Updated bio text"
+  "bio": "Updated bio text",
+  "location": {
+    "latitude": 6.5244,
+    "longitude": 3.3792,
+    "address": "Ikeja, Lagos"
+  },
+  "location_address": "Ikeja, Lagos"
 }
 ```
 
@@ -898,6 +910,11 @@ Available to all authenticated users (both customers and artisans can access the
 - `full_name`: Optional, string (1-255 characters)
 - `phone_number`: Optional, string (10-20 characters), must be unique
 - `bio`: Optional, string (max 1000 characters)
+- `location`: Optional object with:
+  - `latitude`: Required if location provided, number (-90 to 90)
+  - `longitude`: Required if location provided, number (-180 to 180)
+  - `address`: Optional, string (max 500)
+- `location_address`: Optional, string (max 500)
 
 **Success Response (200):**
 ```json
@@ -908,6 +925,9 @@ Available to all authenticated users (both customers and artisans can access the
   "phone_number": "08087654321",
   "profile_picture_url": "https://res.cloudinary.com/workchop/image/upload/v1234567890/profile_pictures/123e4567_a1b2c3d4.jpg",
   "bio": "Updated bio text",
+  "location_address": "Ikeja, Lagos",
+  "location_latitude": 6.5244,
+  "location_longitude": 3.3792,
   "is_email_verified": true,
   "is_active": true,
   "created_at": "2025-01-20T10:00:00Z"
