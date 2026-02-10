@@ -74,6 +74,9 @@ class Settings(BaseSettings):
     NOMINATIM_BASE_URL: str = "https://nominatim.openstreetmap.org"
     NOMINATIM_USER_AGENT: str = "workchop-api/1.0"
 
+    # Booking completion confirmation / payout hold window
+    COMPLETION_DISPUTE_WINDOW_HOURS: int = 24
+
     # Admin
     FIRST_SUPERUSER_EMAIL: EmailStr
     FIRST_SUPERUSER_PASSWORD: str

@@ -377,6 +377,24 @@ async def release_payment(
             detail="Cannot release payment. Job must be completed first."
         )
 
+    # Guard release with client confirmation/dispute-window rule
+    now_utc = datetime.utcnow()
+    is_confirmed = booking.completion_confirmed_by_client_at is not None
+    dispute_window_elapsed = (
+        booking.completion_confirmation_deadline_at is not None
+        and booking.completion_confirmation_deadline_at <= now_utc
+    )
+    if booking.completion_disputed_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot release payment for disputed completion."
+        )
+    if not (is_confirmed or dispute_window_elapsed):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot release payment until customer confirms completion or dispute window elapses."
+        )
+
     try:
         # For now, we'll just mark as released without actual transfer
         # In production, you would:

@@ -4,7 +4,7 @@ Wallet endpoints for artisan earnings and payout management.
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_
+from sqlalchemy import func, and_, or_
 from decimal import Decimal
 from datetime import datetime
 import json
@@ -412,18 +412,33 @@ async def request_payout(
             detail=f"Minimum payout amount is ₦{MINIMUM_PAYOUT}"
         )
 
-    # Get artisan's available balance (RELEASED payments)
+    # Get artisan's available balance (SUCCESS payments - paid by customer, pending release)
     artisan_bookings = db.query(Booking).filter(
         Booking.artisan_id == current_user.id
     ).all()
 
     booking_ids = [b.id for b in artisan_bookings]
 
-    # Calculate available balance (SUCCESS status - paid but not yet released)
+    # Calculate available balance from payments that are:
+    # - SUCCESS (paid by customer, not yet released),
+    # - booking is COMPLETED,
+    # - not disputed,
+    # - and either client-confirmed or dispute window has elapsed.
     available_balance = db.query(func.sum(Payment.amount)).filter(
         and_(
             Payment.booking_id.in_(booking_ids) if booking_ids else False,
-            Payment.status == PaymentStatus.SUCCESS
+            Payment.status == PaymentStatus.SUCCESS,
+            Payment.booking.has(Booking.status == BookingStatus.COMPLETED),
+            Payment.booking.has(Booking.completion_disputed_at.is_(None)),
+            Payment.booking.has(
+                or_(
+                    Booking.completion_confirmed_by_client_at.is_not(None),
+                    and_(
+                        Booking.completion_confirmation_deadline_at.is_not(None),
+                        Booking.completion_confirmation_deadline_at <= func.now(),
+                    ),
+                )
+            ),
         )
     ).scalar() or Decimal(0)
 
@@ -459,7 +474,18 @@ async def request_payout(
         payments_to_release = db.query(Payment).filter(
             and_(
                 Payment.booking_id.in_(booking_ids) if booking_ids else False,
-                Payment.status == PaymentStatus.SUCCESS
+                Payment.status == PaymentStatus.SUCCESS,
+                Payment.booking.has(Booking.status == BookingStatus.COMPLETED),
+                Payment.booking.has(Booking.completion_disputed_at.is_(None)),
+                Payment.booking.has(
+                    or_(
+                        Booking.completion_confirmed_by_client_at.is_not(None),
+                        and_(
+                            Booking.completion_confirmation_deadline_at.is_not(None),
+                            Booking.completion_confirmation_deadline_at <= func.now(),
+                        ),
+                    )
+                ),
             )
         ).order_by(Payment.paid_at.asc()).all()
 

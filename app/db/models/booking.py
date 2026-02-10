@@ -89,6 +89,11 @@ class Booking(Base):
     # Completion Details
     completion_notes = Column(Text, nullable=True)
     completion_images = Column(Text, nullable=True)  # JSON array of Cloudinary URLs
+    completion_marked_by_artisan_at = Column(DateTime(timezone=True), nullable=True)
+    completion_confirmed_by_client_at = Column(DateTime(timezone=True), nullable=True)
+    completion_confirmation_deadline_at = Column(DateTime(timezone=True), nullable=True)
+    completion_disputed_at = Column(DateTime(timezone=True), nullable=True)
+    completion_dispute_reason = Column(Text, nullable=True)
 
     # Cancellation/Rejection Reasons
     cancellation_reason = Column(Text, nullable=True)

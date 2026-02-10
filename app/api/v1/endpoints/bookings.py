@@ -6,10 +6,12 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, or_
 from geoalchemy2.elements import WKTElement
+from datetime import datetime, timedelta, timezone
 import json
 
 from app.db.session import get_db
 from app.api.deps import get_current_user
+from app.core.config import settings
 from app.db.models.user import User, UserType
 from app.db.models.booking import Booking, BookingStatus
 from app.db.models.service import Service
@@ -20,6 +22,7 @@ from app.schemas.booking import (
     RejectBookingRequest,
     CancelBookingRequest,
     CompleteBookingRequest,
+    DisputeCompletionRequest,
     BookingResponse,
     BookingListResponse,
     BookingStatsResponse,
@@ -90,6 +93,11 @@ def _booking_to_response(booking: Booking, db: Session) -> dict:
         "cancelled_at": booking.cancelled_at,
         "completion_notes": booking.completion_notes,
         "completion_images": completion_images,
+        "completion_marked_by_artisan_at": booking.completion_marked_by_artisan_at,
+        "completion_confirmed_by_client_at": booking.completion_confirmed_by_client_at,
+        "completion_confirmation_deadline_at": booking.completion_confirmation_deadline_at,
+        "completion_disputed_at": booking.completion_disputed_at,
+        "completion_dispute_reason": booking.completion_dispute_reason,
         "cancellation_reason": booking.cancellation_reason,
         "rejection_reason": booking.rejection_reason,
         "created_at": booking.created_at,
@@ -485,7 +493,15 @@ async def complete_booking(
 
     # Update booking
     booking.status = BookingStatus.COMPLETED
-    booking.completed_at = func.now()
+    now_utc = datetime.now(timezone.utc)
+    booking.completed_at = now_utc
+    booking.completion_marked_by_artisan_at = now_utc
+    booking.completion_confirmation_deadline_at = now_utc + timedelta(
+        hours=settings.COMPLETION_DISPUTE_WINDOW_HOURS
+    )
+    booking.completion_confirmed_by_client_at = None
+    booking.completion_disputed_at = None
+    booking.completion_dispute_reason = None
     booking.completion_notes = request.completion_notes
 
     # Store completion images as JSON
@@ -495,8 +511,118 @@ async def complete_booking(
     db.commit()
     db.refresh(booking)
 
-    # TODO: Send notification to customer to submit review
+    # TODO: Send notification to customer to confirm completion
 
+    return _booking_to_response(booking, db)
+
+
+@router.patch("/{booking_id}/confirm-completion", response_model=BookingResponse)
+async def confirm_booking_completion(
+    booking_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Customer confirms completed job.
+
+    This marks job completion as verified by customer and makes payout eligible.
+    """
+    if current_user.user_type != UserType.CLIENT:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only customers can confirm completion"
+        )
+
+    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    if not booking:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Booking not found"
+        )
+
+    if booking.customer_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't own this booking"
+        )
+
+    if booking.status != BookingStatus.COMPLETED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot confirm completion for booking in {booking.status.value} status"
+        )
+
+    if booking.completion_disputed_at:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Completion is disputed and cannot be confirmed"
+        )
+
+    booking.completion_confirmed_by_client_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(booking)
+    return _booking_to_response(booking, db)
+
+
+@router.patch("/{booking_id}/dispute-completion", response_model=BookingResponse)
+async def dispute_booking_completion(
+    booking_id: int,
+    request: DisputeCompletionRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Customer disputes a completion marked by artisan.
+
+    Disputes are only accepted during the dispute window.
+    """
+    if current_user.user_type != UserType.CLIENT:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only customers can dispute completion"
+        )
+
+    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    if not booking:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Booking not found"
+        )
+
+    if booking.customer_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't own this booking"
+        )
+
+    if booking.status != BookingStatus.COMPLETED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot dispute completion for booking in {booking.status.value} status"
+        )
+
+    if booking.completion_confirmed_by_client_at:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Completion already confirmed"
+        )
+
+    now_utc = datetime.now(timezone.utc)
+    if (
+        booking.completion_confirmation_deadline_at
+        and now_utc > booking.completion_confirmation_deadline_at
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Dispute window has elapsed"
+        )
+
+    booking.status = BookingStatus.DISPUTED
+    booking.completion_disputed_at = now_utc
+    booking.completion_dispute_reason = request.dispute_reason
+
+    db.commit()
+    db.refresh(booking)
     return _booking_to_response(booking, db)
 
 

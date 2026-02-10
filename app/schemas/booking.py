@@ -28,7 +28,10 @@ class CreateBookingRequest(BaseModel):
     @field_validator('job_date')
     @classmethod
     def validate_job_date(cls, v):
-        if v < datetime.now():
+        # Compare with a "now" value that matches the incoming datetime's timezone
+        # to avoid offset-aware vs offset-naive comparison errors.
+        now = datetime.now(v.tzinfo) if v.tzinfo else datetime.now()
+        if v < now:
             raise ValueError('job_date cannot be in the past')
         return v
 
@@ -105,6 +108,17 @@ class CompleteBookingRequest(BaseModel):
     })
 
 
+class DisputeCompletionRequest(BaseModel):
+    """Request schema for customer disputing completion"""
+    dispute_reason: str = Field(..., min_length=10, max_length=500)
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "dispute_reason": "Job was marked complete but issue is not fixed yet."
+        }
+    })
+
+
 class BookingResponse(BaseModel):
     """Response schema for booking details"""
     id: int
@@ -136,6 +150,11 @@ class BookingResponse(BaseModel):
     cancelled_at: Optional[datetime]
     completion_notes: Optional[str]
     completion_images: Optional[List[str]]
+    completion_marked_by_artisan_at: Optional[datetime]
+    completion_confirmed_by_client_at: Optional[datetime]
+    completion_confirmation_deadline_at: Optional[datetime]
+    completion_disputed_at: Optional[datetime]
+    completion_dispute_reason: Optional[str]
     cancellation_reason: Optional[str]
     rejection_reason: Optional[str]
     created_at: datetime

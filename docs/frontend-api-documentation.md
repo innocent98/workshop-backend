@@ -1986,7 +1986,7 @@ The wallet module allows artisans to track their earnings, view payment history,
 
 **Notes:**
 - Minimum payout amount: ₦5,000
-- Available balance = Pending Release (SUCCESS status payments)
+- Available balance includes only SUCCESS payments tied to COMPLETED bookings that are not disputed and are payout-eligible (client-confirmed or dispute window elapsed)
 - Bank account is verified with Paystack before processing
 - Multiple payments may be released to fulfill the requested amount
 - Payments are released in chronological order (oldest first)
@@ -2032,20 +2032,20 @@ The wallet module allows artisans to track their earnings, view payment history,
 ## Booking Module
 
 ### Overview
-The booking system allows customers to book artisan services, make payments via Paystack, track job progress, and leave reviews. The flow follows these status transitions:
+The booking system allows clients to book artisan services, make payments via Paystack, track job progress, and leave reviews. The flow follows these status transitions:
 
 **Status Flow:**
 ```
 PENDING → ACCEPTED → PAID → IN_PROGRESS → COMPLETED
-   ↓         ↓
-REJECTED  CANCELLED
+   ↓         ↓                      ↓
+REJECTED  CANCELLED             DISPUTED
 ```
 
 ### 1. Create Booking
 
 **Endpoint:** `POST /bookings`
 
-**Authentication:** Required (Customer only)
+**Authentication:** Required (Client only)
 
 **Request Body:**
 ```json
@@ -2106,7 +2106,7 @@ REJECTED  CANCELLED
 
 **Error Responses:**
 - **400** - Validation error (invalid date, budget range, coordinates)
-- **403** - Only customers can create bookings
+- **403** - Only clients can create bookings
 - **404** - Artisan or service not found
 
 ---
@@ -2118,7 +2118,7 @@ REJECTED  CANCELLED
 **Authentication:** Required
 
 **Query Parameters:**
-- `status` (optional): Filter by status (pending, accepted, paid, in_progress, completed, cancelled, rejected, disputed)
+- `status_filter` (optional): Filter by status (pending, accepted, paid, in_progress, completed, cancelled, rejected, disputed)
 - `page` (optional, default 1): Page number
 - `page_size` (optional, default 20, max 100): Items per page
 
@@ -2140,7 +2140,7 @@ REJECTED  CANCELLED
 ```
 
 **Notes:**
-- Customers see bookings they created
+- Clients see bookings they created
 - Artisans see bookings assigned to them
 
 ---
@@ -2330,11 +2330,72 @@ REJECTED  CANCELLED
 
 ---
 
-### 9. Cancel Booking (Customer)
+### 9. Confirm Booking Completion (Customer)
+
+**Endpoint:** `PATCH /bookings/{booking_id}/confirm-completion`
+
+**Authentication:** Required (Client only)
+
+**Request Body:** None
+
+**Success Response (200):**
+```json
+{
+  "id": 1,
+  "booking_reference": "BK-2026-000001",
+  "status": "completed",
+  "completion_confirmed_by_client_at": "2026-02-15T15:00:00Z",
+  ...
+}
+```
+
+**Error Responses:**
+- **400** - Booking not in COMPLETED status, already disputed, or already confirmed
+- **403** - Only booking owner (client) can confirm
+- **404** - Booking not found
+
+---
+
+### 10. Dispute Booking Completion (Customer)
+
+**Endpoint:** `PATCH /bookings/{booking_id}/dispute-completion`
+
+**Authentication:** Required (Client only)
+
+**Request Body:**
+```json
+{
+  "reason": "Job is not fully completed yet"
+}
+```
+
+**Field Requirements:**
+- `reason`: Required, string (10-500 characters)
+
+**Success Response (200):**
+```json
+{
+  "id": 1,
+  "booking_reference": "BK-2026-000001",
+  "status": "disputed",
+  "completion_disputed_at": "2026-02-15T15:05:00Z",
+  "completion_dispute_reason": "Job is not fully completed yet",
+  ...
+}
+```
+
+**Error Responses:**
+- **400** - Booking not in COMPLETED status, dispute window expired, or already confirmed/disputed
+- **403** - Only booking owner (client) can dispute
+- **404** - Booking not found
+
+---
+
+### 11. Cancel Booking (Customer)
 
 **Endpoint:** `PATCH /bookings/{booking_id}/cancel`
 
-**Authentication:** Required (Customer only)
+**Authentication:** Required (Client only)
 
 **Request Body:**
 ```json
@@ -2553,13 +2614,15 @@ Payments are processed via Paystack payment gateway. The system implements a hol
 ```
 
 **Error Responses:**
-- **400** - Payment not in SUCCESS status, or booking not COMPLETED
+- **400** - Payment not in SUCCESS status, booking not COMPLETED, booking disputed, or completion not yet client-confirmed/eligible
 - **403** - Only assigned artisan can release payment
 - **404** - Payment not found
 - **500** - Paystack transfer error
 
 **Notes:**
-- Payment can only be released after job is completed
+- Payment can only be released after job completion is eligible:
+  - client explicitly confirms completion, or
+  - dispute window passes without dispute
 - Funds are transferred from Paystack balance to artisan's bank account
 - In production, this should be admin-only or auto-triggered after review period
 
@@ -2787,25 +2850,27 @@ Customers can review artisans after job completion. Reviews automatically update
 26. **Webhook Security:** Paystack webhooks are signature-verified (HMAC SHA512)
 27. **Anonymous Reviews:** When is_anonymous is true, customer_name returns null
 28. **Payment Flow:** Customer → Paystack checkout → Webhook updates status → Artisan gets notified
-29. **Cancellation Policy:** Bookings can only be cancelled before payment (PENDING or ACCEPTED status)
-30. **Review Period:** Reviews can only be created after booking status is COMPLETED
+29. **Completion Verification:** After artisan completes a booking, client can either confirm completion or dispute within the configured dispute window
+30. **Dispute Effect:** Disputed completions block payment release and payout eligibility until resolved
+31. **Cancellation Policy:** Bookings can only be cancelled before payment (PENDING or ACCEPTED status)
+32. **Review Period:** Reviews can only be created after booking status is COMPLETED
 
 ### Wallet Module
 
-31. **Artisan Only:** All wallet endpoints require artisan authentication
-32. **Real-Time Balance:** Wallet balance is calculated dynamically from payment records, not stored separately
-33. **Pending vs Released:** Pending shows funds held in escrow (SUCCESS status), Released shows actual payouts (RELEASED status)
-34. **No Separate Wallet Table:** Wallet data is derived from Payment and Booking tables
-35. **Payment Flow:** Customer pays → SUCCESS (held by Paystack) → Job completed → RELEASED (paid to artisan)
-36. **Earnings History:** Shows all payments with full booking context for easy tracking
-37. **Payout History:** Shows only completed payouts that artisan has received
-38. **Stats Calculation:** Only includes successful and released payments in statistics
-39. **Minimum Payout:** ₦5,000 minimum payout amount enforced
-40. **Payout Request:** Artisans can request withdrawal of available balance to their bank account
-41. **Bank Verification:** Bank accounts are verified via Paystack before processing payouts
-42. **Payout Processing:** Payments are released in chronological order to fulfill requested amount
-43. **Available Balance:** Only SUCCESS status payments (paid but not yet released) can be withdrawn
-44. **Bank Codes:** Use official Nigerian bank codes (057 for Zenith, 044 for Access, etc.)
+33. **Artisan Only:** All wallet endpoints require artisan authentication
+34. **Real-Time Balance:** Wallet balance is calculated dynamically from payment records, not stored separately
+35. **Pending vs Released:** Pending shows funds held in escrow (SUCCESS status), Released shows actual payouts (RELEASED status)
+36. **No Separate Wallet Table:** Wallet data is derived from Payment and Booking tables
+37. **Payment Flow:** Customer pays → SUCCESS (held by Paystack) → booking completed → client confirms (or dispute window elapses) → RELEASED (paid to artisan)
+38. **Earnings History:** Shows all payments with full booking context for easy tracking
+39. **Payout History:** Shows only completed payouts that artisan has received
+40. **Stats Calculation:** Only includes successful and released payments in statistics
+41. **Minimum Payout:** ₦5,000 minimum payout amount enforced
+42. **Payout Request:** Artisans can request withdrawal of available balance to their bank account
+43. **Bank Verification:** Bank accounts are verified via Paystack before processing payouts
+44. **Payout Processing:** Payments are released in chronological order to fulfill requested amount
+45. **Available Balance:** Only payout-eligible SUCCESS payments can be withdrawn (booking completed, not disputed, and client-confirmed or dispute window elapsed)
+46. **Bank Codes:** Use official Nigerian bank codes (057 for Zenith, 044 for Access, etc.)
 
 ---
 
@@ -2818,5 +2883,5 @@ Customers can review artisans after job completion. Reviews automatically update
 
 ---
 
-**Last Updated:** 2026-02-05
+**Last Updated:** 2026-02-10
 **API Version:** v1
