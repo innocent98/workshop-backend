@@ -28,9 +28,22 @@ from app.schemas.booking import (
     BookingStatsResponse,
 )
 from app.utils.booking_reference import generate_booking_reference
+from app.tasks.notification_tasks import send_push_notification
 
 
 router = APIRouter()
+
+def _notify_user(user_id, title: str, body: str, data: Optional[dict] = None) -> None:
+    try:
+        send_push_notification.delay(
+            user_id=str(user_id),
+            title=title,
+            body=body,
+            data=data or {},
+        )
+    except Exception:
+        # Notifications must not break booking flow
+        pass
 
 
 def _booking_to_response(booking: Booking, db: Session) -> dict:
@@ -167,6 +180,13 @@ async def create_booking(
     db.add(booking)
     db.commit()
     db.refresh(booking)
+
+    _notify_user(
+        artisan.id,
+        "New booking request",
+        f"{current_user.full_name} requested {service.name}.",
+        {"booking_id": str(booking.id), "event": "booking_created"},
+    )
 
     return _booking_to_response(booking, db)
 
@@ -343,7 +363,12 @@ async def accept_booking(
     db.commit()
     db.refresh(booking)
 
-    # TODO: Send notification to customer
+    _notify_user(
+        booking.customer_id,
+        "Booking accepted",
+        "Your booking was accepted by the artisan.",
+        {"booking_id": str(booking.id), "event": "booking_accepted"},
+    )
 
     return _booking_to_response(booking, db)
 
@@ -395,7 +420,12 @@ async def reject_booking(
     db.commit()
     db.refresh(booking)
 
-    # TODO: Send notification to customer
+    _notify_user(
+        booking.customer_id,
+        "Booking rejected",
+        "Your booking request was rejected by the artisan.",
+        {"booking_id": str(booking.id), "event": "booking_rejected"},
+    )
 
     return _booking_to_response(booking, db)
 
@@ -446,7 +476,12 @@ async def start_booking(
     db.commit()
     db.refresh(booking)
 
-    # TODO: Send notification to customer
+    _notify_user(
+        booking.customer_id,
+        "Job started",
+        "The artisan has started your job.",
+        {"booking_id": str(booking.id), "event": "booking_started"},
+    )
 
     return _booking_to_response(booking, db)
 
@@ -511,7 +546,12 @@ async def complete_booking(
     db.commit()
     db.refresh(booking)
 
-    # TODO: Send notification to customer to confirm completion
+    _notify_user(
+        booking.customer_id,
+        "Job completed",
+        "The artisan marked your job as completed. Please confirm completion.",
+        {"booking_id": str(booking.id), "event": "booking_completed"},
+    )
 
     return _booking_to_response(booking, db)
 
@@ -561,6 +601,12 @@ async def confirm_booking_completion(
     booking.completion_confirmed_by_client_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(booking)
+    _notify_user(
+        booking.artisan_id,
+        "Completion confirmed",
+        "Client confirmed job completion.",
+        {"booking_id": str(booking.id), "event": "completion_confirmed"},
+    )
     return _booking_to_response(booking, db)
 
 
@@ -674,6 +720,11 @@ async def cancel_booking(
     db.commit()
     db.refresh(booking)
 
-    # TODO: Send notification to artisan
+    _notify_user(
+        booking.artisan_id,
+        "Booking cancelled",
+        "A customer cancelled a booking request.",
+        {"booking_id": str(booking.id), "event": "booking_cancelled"},
+    )
 
     return _booking_to_response(booking, db)

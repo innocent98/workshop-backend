@@ -1,6 +1,17 @@
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import health, auth, services, profiles, search, bookings, payments, reviews, wallet
+from app.api.v1.endpoints import (
+    health,
+    auth,
+    services,
+    profiles,
+    search,
+    bookings,
+    payments,
+    reviews,
+    wallet,
+    notifications,
+)
 
 api_router = APIRouter()
 
@@ -13,3 +24,4 @@ api_router.include_router(bookings.router, prefix="/bookings", tags=["bookings"]
 api_router.include_router(payments.router, prefix="/payments", tags=["payments"])
 api_router.include_router(reviews.router, prefix="/reviews", tags=["reviews"])
 api_router.include_router(wallet.router, prefix="/wallet", tags=["wallet"])
+api_router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])

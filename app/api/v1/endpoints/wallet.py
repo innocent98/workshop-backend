@@ -137,11 +137,26 @@ async def get_wallet_balance(
         )
     ).scalar() or Decimal(0)
 
-    # Get pending release (SUCCESS payments not yet released)
+    # Get pending release (SUCCESS payments eligible for payout)
+    # Eligibility matches request_payout rules:
+    # - booking completed
+    # - not disputed
+    # - client confirmed OR dispute window elapsed
     pending_release = db.query(func.sum(Payment.amount)).filter(
         and_(
             Payment.booking_id.in_(booking_ids) if booking_ids else False,
-            Payment.status == PaymentStatus.SUCCESS
+            Payment.status == PaymentStatus.SUCCESS,
+            Payment.booking.has(Booking.status == BookingStatus.COMPLETED),
+            Payment.booking.has(Booking.completion_disputed_at.is_(None)),
+            Payment.booking.has(
+                or_(
+                    Booking.completion_confirmed_by_client_at.is_not(None),
+                    and_(
+                        Booking.completion_confirmation_deadline_at.is_not(None),
+                        Booking.completion_confirmation_deadline_at <= func.now(),
+                    ),
+                )
+            ),
         )
     ).scalar() or Decimal(0)
 

@@ -77,6 +77,10 @@ class Settings(BaseSettings):
     # Booking completion confirmation / payout hold window
     COMPLETION_DISPUTE_WINDOW_HOURS: int = 24
 
+    # Push notifications (Firebase Cloud Messaging)
+    FCM_ENABLED: bool = True
+    FCM_SERVICE_ACCOUNT_FILE: Optional[str] = "/app/app/service_account/workchop-b3069-firebase-adminsdk-fbsvc-75e0bff73a.json"
+
     # Admin
     FIRST_SUPERUSER_EMAIL: EmailStr
     FIRST_SUPERUSER_PASSWORD: str

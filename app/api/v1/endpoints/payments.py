@@ -23,9 +23,22 @@ from app.schemas.payment import (
 )
 from app.utils.payment_reference import generate_payment_reference
 from app.services.paystack import PaystackService, PaystackError
+from app.tasks.notification_tasks import send_push_notification
 
 
 router = APIRouter()
+
+def _notify_user(user_id, title: str, body: str, data: Optional[dict] = None) -> None:
+    try:
+        send_push_notification.delay(
+            user_id=str(user_id),
+            title=title,
+            body=body,
+            data=data or {},
+        )
+    except Exception:
+        # Notifications must not break payment flow
+        pass
 
 
 @router.post("/initialize", response_model=InitializePaymentResponse, status_code=status.HTTP_201_CREATED)
@@ -69,13 +82,25 @@ async def initialize_payment(
             detail=f"Cannot pay for booking in {booking.status.value} status. Booking must be accepted by artisan first."
         )
 
-    # Check if payment already exists
+    # Idempotency for repeated initialize attempts on same booking
     existing_payment = db.query(Payment).filter(Payment.booking_id == booking.id).first()
-    if existing_payment and existing_payment.status in [PaymentStatus.SUCCESS, PaymentStatus.PROCESSING]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Payment already exists for this booking"
-        )
+    if existing_payment:
+        # Active/paid flows should return existing payment details, not crash on unique booking_id
+        if existing_payment.status in [
+            PaymentStatus.PENDING,
+            PaymentStatus.PROCESSING,
+            PaymentStatus.SUCCESS,
+            PaymentStatus.RELEASED,
+        ]:
+            return {
+                "id": existing_payment.id,
+                "payment_reference": existing_payment.payment_reference,
+                "booking_id": existing_payment.booking_id,
+                "authorization_url": existing_payment.authorization_url,
+                "amount": existing_payment.amount,
+                "status": existing_payment.status.value,
+                "created_at": existing_payment.created_at,
+            }
 
     # Generate payment reference
     payment_reference = generate_payment_reference(db)
@@ -98,24 +123,45 @@ async def initialize_payment(
             metadata=metadata
         )
 
-        # Create payment record
-        payment = Payment(
-            payment_reference=payment_reference,
-            paystack_reference=paystack_response.get('reference'),
-            paystack_access_code=paystack_response.get('access_code'),
-            booking_id=booking.id,
-            authorization_url=paystack_response.get('authorization_url'),
-            amount=booking.agreed_amount,
-            currency="NGN",
-            status=PaymentStatus.PENDING,
-            customer_email=current_user.email,
-            customer_name=current_user.full_name,
-            paystack_response=json.dumps(paystack_response)
-        )
+        # If an existing failed/refunded record exists, reuse it for a new checkout attempt.
+        if existing_payment and existing_payment.status in [PaymentStatus.FAILED, PaymentStatus.REFUNDED]:
+            existing_payment.payment_reference = payment_reference
+            existing_payment.paystack_reference = paystack_response.get('reference')
+            existing_payment.paystack_access_code = paystack_response.get('access_code')
+            existing_payment.authorization_url = paystack_response.get('authorization_url')
+            existing_payment.amount = booking.agreed_amount
+            existing_payment.currency = "NGN"
+            existing_payment.status = PaymentStatus.PENDING
+            existing_payment.customer_email = current_user.email
+            existing_payment.customer_name = current_user.full_name
+            existing_payment.paystack_response = json.dumps(paystack_response)
+            existing_payment.payment_method = None
+            existing_payment.paid_at = None
+            existing_payment.released_at = None
+            existing_payment.refunded_at = None
+            existing_payment.failed_at = None
+            payment = existing_payment
+            db.commit()
+            db.refresh(payment)
+        else:
+            # Create payment record
+            payment = Payment(
+                payment_reference=payment_reference,
+                paystack_reference=paystack_response.get('reference'),
+                paystack_access_code=paystack_response.get('access_code'),
+                booking_id=booking.id,
+                authorization_url=paystack_response.get('authorization_url'),
+                amount=booking.agreed_amount,
+                currency="NGN",
+                status=PaymentStatus.PENDING,
+                customer_email=current_user.email,
+                customer_name=current_user.full_name,
+                paystack_response=json.dumps(paystack_response)
+            )
 
-        db.add(payment)
-        db.commit()
-        db.refresh(payment)
+            db.add(payment)
+            db.commit()
+            db.refresh(payment)
 
         return {
             "id": payment.id,
@@ -167,6 +213,14 @@ async def verify_payment(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You don't have permission to verify this payment"
         )
+    if payment.status in [PaymentStatus.SUCCESS, PaymentStatus.RELEASED]:
+        return {
+            "payment_reference": payment.payment_reference,
+            "status": payment.status.value,
+            "amount": payment.amount,
+            "paid": True,
+            "message": "Payment already verified",
+        }
 
     try:
         # Verify with Paystack
@@ -184,6 +238,12 @@ async def verify_payment(
             booking.paid_at = datetime.utcnow()
 
             db.commit()
+            _notify_user(
+                booking.artisan_id,
+                "Payment received",
+                "Client has paid for a booking. You can now start the job.",
+                {"booking_id": str(booking.id), "event": "payment_success"},
+            )
 
             return {
                 "payment_reference": payment.payment_reference,
@@ -277,7 +337,13 @@ async def paystack_webhook(
 
         db.commit()
 
-        # TODO: Send notification to artisan
+        if booking:
+            _notify_user(
+                booking.artisan_id,
+                "Payment received",
+                "Client has paid for a booking. You can now start the job.",
+                {"booking_id": str(booking.id), "event": "payment_success"},
+            )
 
         return {"status": "success", "message": "Payment processed"}
 
@@ -427,7 +493,12 @@ async def release_payment(
         db.commit()
         db.refresh(payment)
 
-        # TODO: Send notification to artisan
+        _notify_user(
+            booking.artisan_id,
+            "Payment released",
+            "A completed booking payment has been released to your wallet flow.",
+            {"booking_id": str(booking.id), "event": "payment_released"},
+        )
 
         return payment
 

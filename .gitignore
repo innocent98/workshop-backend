@@ -67,6 +67,9 @@ Thumbs.db
 logs/
 *.log
 
+# Firebase service account keys
+app/service_account/*.json
+
 # Database
 *.db
 *.sqlite

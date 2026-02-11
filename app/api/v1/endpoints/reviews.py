@@ -93,20 +93,21 @@ async def create_review(
     ).first()
 
     if artisan_profile:
-        # Recalculate average rating
-        total_reviews = db.query(func.count(Review.id)).filter(
-            Review.artisan_id == booking.artisan_id
-        ).scalar() or 0
+        # Flush the new review so aggregate queries include it
+        db.flush()
 
-        avg_rating = db.query(func.avg(Review.rating)).filter(
-            Review.artisan_id == booking.artisan_id
-        ).scalar() or 0.0
+        # Recalculate ratings from source of truth
+        total_reviews, avg_rating = db.query(
+            func.count(Review.id),
+            func.avg(Review.rating),
+        ).filter(
+            Review.artisan_id == booking.artisan_id,
+            Review.is_flagged == False,  # noqa: E712
+        ).one()
 
         # Update profile
-        artisan_profile.total_ratings = total_reviews + 1
-        artisan_profile.average_rating = float(avg_rating) if total_reviews == 0 else (
-            (float(artisan_profile.average_rating or 0) * total_reviews + float(request.rating)) / (total_reviews + 1)
-        )
+        artisan_profile.total_ratings = int(total_reviews or 0)
+        artisan_profile.average_rating = float(avg_rating or 0.0)
         artisan_profile.total_jobs_completed = (artisan_profile.total_jobs_completed or 0) + 1
 
     db.commit()

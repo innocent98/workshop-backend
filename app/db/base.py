@@ -18,4 +18,5 @@ def import_models():
         Booking,
         Payment,
         Review,
+        PushDevice,
     )

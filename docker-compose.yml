@@ -10,6 +10,7 @@ services:
       - "8000:8000"
     volumes:
       - ./app:/app/app
+      - ${FCM_SERVICE_ACCOUNT_FILE_HOST}:/run/secrets/fcm-service-account.json:ro
     env_file:
       - .env
     depends_on:
@@ -119,6 +120,7 @@ services:
     command: celery -A app.celery_app worker --loglevel=info --concurrency=2
     volumes:
       - ./app:/app/app
+      - ${FCM_SERVICE_ACCOUNT_FILE_HOST}:/run/secrets/fcm-service-account.json:ro
     env_file:
       - .env
     environment:
