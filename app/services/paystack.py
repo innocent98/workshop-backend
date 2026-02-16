@@ -9,7 +9,10 @@ from app.core.config import settings
 
 class PaystackError(Exception):
     """Custom exception for Paystack API errors"""
-    pass
+    def __init__(self, message: str, status_code: Optional[int] = None):
+        super().__init__(message)
+        self.message = message
+        self.status_code = status_code
 
 
 class PaystackService:
@@ -87,16 +90,34 @@ class PaystackService:
                 headers=cls._get_headers(),
                 timeout=30
             )
-            response.raise_for_status()
-            data = response.json()
-
-            if not data.get("status"):
-                raise PaystackError(data.get("message", "Transaction initialization failed"))
-
-            return data["data"]
-
         except requests.RequestException as e:
             raise PaystackError(f"Paystack API request failed: {str(e)}")
+
+        data: Dict = {}
+        try:
+            data = response.json()
+        except Exception:
+            data = {}
+
+        if response.status_code >= 400:
+            message = (
+                data.get("message")
+                or data.get("detail")
+                or response.text
+                or "Transaction initialization failed"
+            )
+            raise PaystackError(
+                f"Paystack initialize error ({response.status_code}): {message}",
+                status_code=response.status_code,
+            )
+
+        if not data.get("status"):
+            raise PaystackError(
+                data.get("message", "Transaction initialization failed"),
+                status_code=response.status_code,
+            )
+
+        return data["data"]
 
     @classmethod
     def verify_transaction(cls, reference: str) -> Dict:

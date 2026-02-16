@@ -4,13 +4,12 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: workchop-api_api
-    platform: linux/amd64
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     ports:
-      - "8000:8000"
+      - "${API_HOST_PORT:-8000}:8000"
     volumes:
       - ./app:/app/app
-      - ${FCM_SERVICE_ACCOUNT_FILE_HOST}:/run/secrets/fcm-service-account.json:ro
+      - ${FCM_SERVICE_ACCOUNT_FILE_HOST:-/opt/workchop/secrets/fcm-service-account.json}:/run/secrets/fcm-service-account.json:ro
     env_file:
       - .env
     depends_on:
@@ -38,7 +37,6 @@ services:
   db:
     image: postgis/postgis:15-3.4-alpine
     container_name: workchop-api_db
-    platform: linux/amd64
     environment:
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
@@ -48,8 +46,6 @@ services:
       POSTGRES_EFFECTIVE_CACHE_SIZE: 1GB
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U user -d workchop_db"]
@@ -71,8 +67,6 @@ services:
     command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data
-    ports:
-      - "6379:6379"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -94,8 +88,9 @@ services:
   adminer:
     image: adminer:4-standalone
     container_name: workchop-api_adminer
+    profiles: ["tools"]
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     environment:
       ADMINER_DEFAULT_SERVER: db
       ADMINER_DESIGN: nette
@@ -116,11 +111,10 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: workchop-api_celery_worker
-    platform: linux/amd64
     command: celery -A app.celery_app worker --loglevel=info --concurrency=2
     volumes:
       - ./app:/app/app
-      - ${FCM_SERVICE_ACCOUNT_FILE_HOST}:/run/secrets/fcm-service-account.json:ro
+      - ${FCM_SERVICE_ACCOUNT_FILE_HOST:-/opt/workchop/secrets/fcm-service-account.json}:/run/secrets/fcm-service-account.json:ro
     env_file:
       - .env
     environment:
@@ -153,7 +147,6 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: workchop-api_celery_beat
-    platform: linux/amd64
     command: celery -A app.celery_app beat --loglevel=info
     volumes:
       - ./app:/app/app

@@ -66,6 +66,16 @@ async def create_review(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Can only review completed bookings"
         )
+    if booking.completion_disputed_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot review a disputed booking"
+        )
+    if booking.completion_confirmed_by_client_at is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Can only review after completion has been confirmed"
+        )
 
     # Check if review already exists
     existing_review = db.query(Review).filter(Review.booking_id == request.booking_id).first()

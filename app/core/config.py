@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     BACKEND_CORS_ORIGINS: List[str] = [
         "http://localhost:3000",
         "http://localhost:8000",
-        "https://0b7fd6f1a85b.ngrok-free.app"
+        "https://workchop.luranai.com"
     ]
 
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")

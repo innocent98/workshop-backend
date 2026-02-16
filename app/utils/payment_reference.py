@@ -1,13 +1,13 @@
-from datetime import datetime
+from datetime import datetime, timezone
+import random
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 
 
 def generate_payment_reference(db: Session) -> str:
     """
-    Generate a unique payment reference in the format: PAY-YYYY-XXXXXX
-
-    Example: PAY-2025-000001
+    Generate a unique payment reference in a collision-resistant format.
+    Format: PAY-YYDDDHHMMSS-RRR (max 20 chars)
+    Example: PAY-26047141920-583
 
     Args:
         db: Database session
@@ -17,22 +17,16 @@ def generate_payment_reference(db: Session) -> str:
     """
     from app.db.models.payment import Payment
 
-    # Get current year
-    current_year = datetime.now().year
+    for _ in range(20):
+        now = datetime.now(timezone.utc)
+        # 2(year) + 3(day_of_year) + 2(hour) + 2(minute) + 2(second) = 11 chars
+        stamp = now.strftime("%y%j%H%M%S")
+        rand = random.randint(100, 999)
+        reference = f"PAY-{stamp}-{rand}"
 
-    # Get the count of payments created this year
-    year_start = datetime(current_year, 1, 1)
-    count = db.query(func.count(Payment.id)).filter(
-        Payment.created_at >= year_start
-    ).scalar() or 0
+        if not db.query(Payment).filter(Payment.payment_reference == reference).first():
+            return reference
 
-    # Generate reference with next number
-    next_number = count + 1
-    reference = f"PAY-{current_year}-{next_number:06d}"
-
-    # Check if reference exists (edge case for concurrent requests)
-    while db.query(Payment).filter(Payment.payment_reference == reference).first():
-        next_number += 1
-        reference = f"PAY-{current_year}-{next_number:06d}"
-
-    return reference
+    # Last fallback in extremely unlikely collision scenarios.
+    now = datetime.now(timezone.utc)
+    return f"PAY-{now.strftime('%y%j%H%M%S')}-{random.randint(100, 999)}"

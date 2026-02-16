@@ -116,39 +116,62 @@ class AuthService:
         Step 3a: Send OTP for email verification.
         """
         uuid_id = parse_uuid(user_id)
-        user = db.query(User).filter(User.id == uuid_id, User.email == email).first()
+        normalized_email = email.strip().lower()
+
+        user = db.query(User).filter(User.id == uuid_id).first()
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="User not found"
             )
 
-        # Invalidate any existing unused OTPs for this user
-        db.query(OTP).filter(
-            OTP.user_id == uuid_id,
-            OTP.otp_type == OTPType.PHONE_VERIFICATION,
-            OTP.is_used == False
-        ).update({"is_used": True})
+        if user.email.lower() != normalized_email:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email does not match the registration record"
+            )
 
-        # Generate new OTP
-        otp_code = generate_otp()
-        expires_at = calculate_otp_expiry(minutes=10)
+        try:
+            # Invalidate any existing unused OTPs for this user
+            db.query(OTP).filter(
+                OTP.user_id == uuid_id,
+                OTP.otp_type == OTPType.PHONE_VERIFICATION,
+                OTP.is_used.is_(False)
+            ).update({"is_used": True})
 
-        otp = OTP(
-            user_id=user.id,
-            otp_code=otp_code,
-            otp_type=OTPType.PHONE_VERIFICATION,
-            expires_at=expires_at,
-        )
+            # Generate new OTP
+            otp_code = generate_otp()
+            expires_at = calculate_otp_expiry(minutes=10)
 
-        db.add(otp)
-        db.commit()
+            otp = OTP(
+                user_id=user.id,
+                otp_code=otp_code,
+                otp_type=OTPType.PHONE_VERIFICATION,
+                expires_at=expires_at,
+            )
+            db.add(otp)
+            db.flush()
 
-        # Send OTP via email
-        success = await send_otp_email(email, otp_code, purpose="verification")
+            # Send OTP via email first; commit only if dispatch succeeds.
+            success = await send_otp_email(user.email, otp_code, purpose="verification")
+            if not success:
+                db.rollback()
+                log.error(f"Failed to send verification OTP email to {user.email}")
+                return False
 
-        log.info(f"OTP sent to {email}: {otp_code}")
-        return success
+            db.commit()
+            log.info(f"OTP sent to {user.email}: {otp_code}")
+            return True
+        except HTTPException:
+            db.rollback()
+            raise
+        except Exception as e:
+            db.rollback()
+            log.error(f"Unexpected error while sending verification OTP: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to send verification OTP"
+            )
 
     @staticmethod
     def verify_otp(

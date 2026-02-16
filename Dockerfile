@@ -51,6 +51,7 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 COPY ./app /app/app
 COPY ./alembic /app/alembic
 COPY ./alembic.ini /app/alembic.ini
+COPY ./scripts /app/scripts
 COPY ./docker-entrypoint.sh /app/docker-entrypoint.sh
 
 # Create non-root user and set permissions

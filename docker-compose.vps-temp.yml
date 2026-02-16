@@ -1,0 +1,20 @@
+services:
+  api:
+    container_name: workchop-temp_api
+
+  db:
+    container_name: workchop-temp_db
+
+  redis:
+    container_name: workchop-temp_redis
+
+  adminer:
+    container_name: workchop-temp_adminer
+    ports:
+      - "127.0.0.1:8081:8080"
+
+  celery_worker:
+    container_name: workchop-temp_celery_worker
+
+  celery_beat:
+    container_name: workchop-temp_celery_beat

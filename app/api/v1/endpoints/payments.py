@@ -81,6 +81,11 @@ async def initialize_payment(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Cannot pay for booking in {booking.status.value} status. Booking must be accepted by artisan first."
         )
+    if booking.agreed_amount is None or booking.agreed_amount <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Booking agreed amount must be greater than zero before payment can be initialized"
+        )
 
     # Idempotency for repeated initialize attempts on same booking
     existing_payment = db.query(Payment).filter(Payment.booking_id == booking.id).first()
@@ -102,9 +107,6 @@ async def initialize_payment(
                 "created_at": existing_payment.created_at,
             }
 
-    # Generate payment reference
-    payment_reference = generate_payment_reference(db)
-
     # Prepare metadata
     metadata = {
         "booking_id": booking.id,
@@ -115,13 +117,29 @@ async def initialize_payment(
     }
 
     try:
-        # Initialize transaction with Paystack
-        paystack_response = PaystackService.initialize_transaction(
-            email=current_user.email,
-            amount=booking.agreed_amount,
-            reference=payment_reference,
-            metadata=metadata
-        )
+        # Initialize transaction with Paystack.
+        # Retry with a fresh reference if upstream reports duplicate reference.
+        paystack_response = None
+        payment_reference = None
+        last_paystack_error = None
+        for _ in range(3):
+            payment_reference = generate_payment_reference(db)
+            try:
+                paystack_response = PaystackService.initialize_transaction(
+                    email=current_user.email,
+                    amount=booking.agreed_amount,
+                    reference=payment_reference,
+                    metadata=metadata
+                )
+                break
+            except PaystackError as e:
+                last_paystack_error = e
+                if "Duplicate Transaction Reference" in str(e):
+                    continue
+                raise
+
+        if paystack_response is None:
+            raise last_paystack_error or PaystackError("Transaction initialization failed")
 
         # If an existing failed/refunded record exists, reuse it for a new checkout attempt.
         if existing_payment and existing_payment.status in [PaymentStatus.FAILED, PaymentStatus.REFUNDED]:
@@ -174,8 +192,13 @@ async def initialize_payment(
         }
 
     except PaystackError as e:
+        mapped_status = (
+            status.HTTP_400_BAD_REQUEST
+            if e.status_code is not None and 400 <= e.status_code < 500
+            else status.HTTP_502_BAD_GATEWAY
+        )
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=mapped_status,
             detail=f"Payment initialization failed: {str(e)}"
         )
 
