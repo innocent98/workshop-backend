@@ -70,6 +70,12 @@ logs/
 # Firebase service account keys
 app/service_account/*.json
 
+# Local secret mounts / key material
+secrets/
+*.pem
+*.key
+*.p12
+
 # Database
 *.db
 *.sqlite
