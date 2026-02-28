@@ -22,6 +22,8 @@ from app.schemas.booking import (
     RejectBookingRequest,
     CancelBookingRequest,
     CompleteBookingRequest,
+    NegotiateBookingRequest,
+    NegotiateResponseRequest,
     DisputeCompletionRequest,
     BookingResponse,
     BookingListResponse,
@@ -32,6 +34,12 @@ from app.tasks.notification_tasks import send_push_notification
 
 
 router = APIRouter()
+NEGOTIATION_STATUS_NONE = "none"
+NEGOTIATION_STATUS_PENDING_CLIENT = "pending_client"
+NEGOTIATION_STATUS_PENDING_ARTISAN = "pending_artisan"
+NEGOTIATION_STATUS_AGREED = "agreed"
+NEGOTIATION_STATUS_DECLINED = "declined"
+NEGOTIATION_MAX_ROUNDS_PER_SIDE = 2
 
 def _notify_user(user_id, title: str, body: str, data: Optional[dict] = None) -> None:
     try:
@@ -44,6 +52,14 @@ def _notify_user(user_id, title: str, body: str, data: Optional[dict] = None) ->
     except Exception:
         # Notifications must not break booking flow
         pass
+
+
+def _ensure_pending_booking(booking: Booking, action: str) -> None:
+    if booking.status != BookingStatus.PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot {action} booking in {booking.status.value} status",
+        )
 
 
 def _booking_to_response(booking: Booking, db: Session) -> dict:
@@ -98,6 +114,17 @@ def _booking_to_response(booking: Booking, db: Session) -> dict:
         "budget_min": booking.budget_min,
         "budget_max": booking.budget_max,
         "agreed_amount": booking.agreed_amount,
+        "negotiated_amount": booking.negotiated_amount,
+        "negotiation_condition": booking.negotiation_condition,
+        "negotiation_status": booking.negotiation_status or NEGOTIATION_STATUS_NONE,
+        "negotiation_last_offer_by": booking.negotiation_last_offer_by,
+        "artisan_negotiation_rounds_used": booking.artisan_negotiation_rounds_used or 0,
+        "client_negotiation_rounds_used": booking.client_negotiation_rounds_used or 0,
+        "negotiation_started_at": booking.negotiation_started_at,
+        "negotiation_updated_at": booking.negotiation_updated_at,
+        "negotiation_agreed_at": booking.negotiation_agreed_at,
+        "negotiation_declined_at": booking.negotiation_declined_at,
+        "negotiated_override": bool(booking.negotiated_override),
         "status": booking.status.value,
         "accepted_at": booking.accepted_at,
         "paid_at": booking.paid_at,
@@ -308,6 +335,224 @@ async def get_booking(
     return _booking_to_response(booking, db)
 
 
+@router.patch("/{booking_id}/negotiate", response_model=BookingResponse)
+async def negotiate_booking(
+    booking_id: int,
+    request: NegotiateBookingRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Artisan starts/counters negotiation on a pending booking.
+
+    Rules:
+    - Only artisan can initiate the first offer.
+    - Max 2 negotiation rounds per side.
+    """
+    if current_user.user_type != UserType.ARTISAN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only artisans can negotiate booking price"
+        )
+
+    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    if not booking:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Booking not found"
+        )
+
+    if booking.artisan_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not assigned to this booking"
+        )
+
+    _ensure_pending_booking(booking, "negotiate")
+
+    now_utc = datetime.now(timezone.utc)
+    current_status = booking.negotiation_status or NEGOTIATION_STATUS_NONE
+
+    if current_status in {NEGOTIATION_STATUS_AGREED, NEGOTIATION_STATUS_DECLINED}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Negotiation is already closed for this booking"
+        )
+
+    if booking.negotiation_last_offer_by == "artisan" and current_status == NEGOTIATION_STATUS_PENDING_CLIENT:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Waiting for client response to your last offer"
+        )
+
+    if booking.artisan_negotiation_rounds_used >= NEGOTIATION_MAX_ROUNDS_PER_SIDE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Artisan negotiation rounds exhausted (max 2)"
+        )
+
+    # First offer must come from artisan; this endpoint enforces artisan identity already.
+    if current_status == NEGOTIATION_STATUS_NONE:
+        booking.negotiation_started_at = now_utc
+
+    booking.negotiated_amount = request.negotiated_amount
+    booking.negotiation_condition = request.negotiation_condition.strip()
+    booking.negotiation_status = NEGOTIATION_STATUS_PENDING_CLIENT
+    booking.negotiation_last_offer_by = "artisan"
+    booking.artisan_negotiation_rounds_used = (booking.artisan_negotiation_rounds_used or 0) + 1
+    booking.negotiation_updated_at = now_utc
+    booking.negotiation_agreed_at = None
+    booking.negotiation_declined_at = None
+    booking.negotiated_override = False
+
+    db.commit()
+    db.refresh(booking)
+
+    _notify_user(
+        booking.customer_id,
+        "New price negotiation",
+        f"Artisan proposed ₦{float(request.negotiated_amount):.0f}. Round {booking.artisan_negotiation_rounds_used}/2.",
+        {"booking_id": str(booking.id), "event": "booking_negotiation_proposed"},
+    )
+
+    return _booking_to_response(booking, db)
+
+
+@router.patch("/{booking_id}/negotiate/respond", response_model=BookingResponse)
+async def respond_to_negotiation(
+    booking_id: int,
+    request: NegotiateResponseRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Client responds to artisan negotiation (agree/counter/decline).
+
+    Rules:
+    - Client can only respond after artisan sends first negotiation.
+    - Decline immediately cancels booking.
+    - Client has max 2 rounds for counter-offers.
+    """
+    if current_user.user_type != UserType.CLIENT:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only customers can respond to negotiation"
+        )
+
+    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    if not booking:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Booking not found"
+        )
+
+    if booking.customer_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't own this booking"
+        )
+
+    _ensure_pending_booking(booking, "respond to negotiation")
+
+    current_status = booking.negotiation_status or NEGOTIATION_STATUS_NONE
+    now_utc = datetime.now(timezone.utc)
+    action = request.action.lower()
+
+    if current_status in {NEGOTIATION_STATUS_NONE, NEGOTIATION_STATUS_DECLINED}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No active artisan negotiation to respond to"
+        )
+
+    if current_status == NEGOTIATION_STATUS_PENDING_ARTISAN and action != "decline":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Waiting for artisan response; you can only decline now"
+        )
+
+    if action == "agree":
+        if booking.negotiated_amount is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No negotiated amount available to agree on"
+            )
+
+        booking.agreed_amount = booking.negotiated_amount
+        booking.negotiation_status = NEGOTIATION_STATUS_AGREED
+        booking.negotiation_last_offer_by = "client"
+        booking.negotiation_agreed_at = now_utc
+        booking.negotiation_updated_at = now_utc
+        booking.negotiated_override = not (
+            booking.budget_min <= booking.agreed_amount <= booking.budget_max
+        )
+
+        db.commit()
+        db.refresh(booking)
+
+        _notify_user(
+            booking.artisan_id,
+            "Negotiation agreed",
+            "Client agreed to the negotiated price. You can now accept the booking.",
+            {"booking_id": str(booking.id), "event": "booking_negotiation_agreed"},
+        )
+        return _booking_to_response(booking, db)
+
+    if action == "counter":
+        if request.negotiated_amount is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="negotiated_amount is required for counter action"
+            )
+        if not request.negotiation_condition:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="negotiation_condition is required for counter action"
+            )
+        if booking.client_negotiation_rounds_used >= NEGOTIATION_MAX_ROUNDS_PER_SIDE:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Client negotiation rounds exhausted (max 2)"
+            )
+
+        booking.negotiated_amount = request.negotiated_amount
+        booking.negotiation_condition = request.negotiation_condition.strip()
+        booking.negotiation_status = NEGOTIATION_STATUS_PENDING_ARTISAN
+        booking.negotiation_last_offer_by = "client"
+        booking.client_negotiation_rounds_used = (booking.client_negotiation_rounds_used or 0) + 1
+        booking.negotiation_updated_at = now_utc
+
+        db.commit()
+        db.refresh(booking)
+
+        _notify_user(
+            booking.artisan_id,
+            "Client counter-offer received",
+            f"Client proposed ₦{float(request.negotiated_amount):.0f}. Round {booking.client_negotiation_rounds_used}/2.",
+            {"booking_id": str(booking.id), "event": "booking_negotiation_countered"},
+        )
+        return _booking_to_response(booking, db)
+
+    # decline
+    booking.negotiation_status = NEGOTIATION_STATUS_DECLINED
+    booking.negotiation_last_offer_by = "client"
+    booking.negotiation_declined_at = now_utc
+    booking.negotiation_updated_at = now_utc
+    booking.status = BookingStatus.CANCELLED
+    booking.cancelled_at = now_utc
+    booking.cancellation_reason = "Client declined negotiated price"
+
+    db.commit()
+    db.refresh(booking)
+
+    _notify_user(
+        booking.artisan_id,
+        "Negotiation declined",
+        "Client declined the negotiation. Booking has been cancelled.",
+        {"booking_id": str(booking.id), "event": "booking_negotiation_declined"},
+    )
+    return _booking_to_response(booking, db)
+
+
 @router.patch("/{booking_id}/accept", response_model=BookingResponse)
 async def accept_booking(
     booking_id: int,
@@ -341,22 +586,31 @@ async def accept_booking(
             detail="You are not assigned to this booking"
         )
 
-    # Check if booking is in PENDING status
-    if booking.status != BookingStatus.PENDING:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot accept booking in {booking.status.value} status"
-        )
+    _ensure_pending_booking(booking, "accept")
 
-    # Validate agreed_amount is within budget range
-    if not (booking.budget_min <= request.agreed_amount <= booking.budget_max):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Agreed amount must be between {booking.budget_min} and {booking.budget_max}"
+    # If negotiation has reached client counter/agreement state, artisan accepts
+    # the latest negotiated amount (outside budget range allowed with override).
+    if (
+        booking.negotiated_amount is not None and
+        (booking.negotiation_status in {NEGOTIATION_STATUS_PENDING_ARTISAN, NEGOTIATION_STATUS_AGREED})
+    ):
+        booking.agreed_amount = booking.negotiated_amount
+        booking.negotiated_override = not (
+            booking.budget_min <= booking.agreed_amount <= booking.budget_max
         )
+        booking.negotiation_status = NEGOTIATION_STATUS_AGREED
+        booking.negotiation_agreed_at = datetime.now(timezone.utc)
+        booking.negotiation_updated_at = datetime.now(timezone.utc)
+    else:
+        # Non-negotiated acceptance must stay inside customer range.
+        if not (booking.budget_min <= request.agreed_amount <= booking.budget_max):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Agreed amount must be between {booking.budget_min} and {booking.budget_max}"
+            )
+        booking.agreed_amount = request.agreed_amount
+        booking.negotiated_override = False
 
-    # Update booking
-    booking.agreed_amount = request.agreed_amount
     booking.status = BookingStatus.ACCEPTED
     booking.accepted_at = func.now()
 

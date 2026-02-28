@@ -2224,6 +2224,79 @@ REJECTED  CANCELLED             DISPUTED
 - **403** - Only assigned artisan can accept
 - **404** - Booking not found
 
+**Negotiation-aware acceptance:**
+- If negotiation is active and latest client offer exists (`negotiation_status = pending_artisan` or `agreed`), artisan acceptance uses `negotiated_amount` as final agreed amount.
+- In that negotiated path, final amount may be outside original client range.
+
+---
+
+### 5b. Negotiate Booking Price (Artisan)
+
+**Endpoint:** `PATCH /bookings/{booking_id}/negotiate`
+
+**Authentication:** Required (Artisan only)
+
+**Request Body:**
+```json
+{
+  "negotiated_amount": 10000.00,
+  "negotiation_condition": "Distance and transport cost are higher for this job."
+}
+```
+
+**Rules:**
+- Booking must be in `pending` status.
+- First negotiation must come from artisan.
+- Maximum 2 rounds per side:
+  - `artisan_negotiation_rounds_used` max 2
+  - `client_negotiation_rounds_used` max 2
+- Sets `negotiation_status = pending_client`.
+
+**Push event:**
+- Sent to client with event `booking_negotiation_proposed`.
+
+---
+
+### 5c. Respond to Negotiation (Client)
+
+**Endpoint:** `PATCH /bookings/{booking_id}/negotiate/respond`
+
+**Authentication:** Required (Client only)
+
+**Request Body (Agree):**
+```json
+{
+  "action": "agree"
+}
+```
+
+**Request Body (Counter):**
+```json
+{
+  "action": "counter",
+  "negotiated_amount": 9000.00,
+  "negotiation_condition": "Can we meet halfway?"
+}
+```
+
+**Request Body (Decline):**
+```json
+{
+  "action": "decline"
+}
+```
+
+**Rules:**
+- Client can only respond after artisan starts negotiation.
+- `action=counter` requires both `negotiated_amount` and `negotiation_condition`.
+- `action=decline` cancels the booking immediately (`status = cancelled`).
+- `action=agree` marks negotiation agreed; artisan still performs final booking accept action.
+
+**Push events:**
+- Counter to artisan: `booking_negotiation_countered`
+- Agree to artisan: `booking_negotiation_agreed`
+- Decline to artisan: `booking_negotiation_declined`
+
 ---
 
 ### 6. Reject Booking (Artisan)

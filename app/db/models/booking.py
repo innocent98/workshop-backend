@@ -1,7 +1,7 @@
 import enum
 from sqlalchemy import (
     Column, Integer, String, Text, DateTime, ForeignKey,
-    Enum as SQLEnum, DECIMAL, CheckConstraint
+    Enum as SQLEnum, DECIMAL, CheckConstraint, Boolean
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
@@ -70,6 +70,17 @@ class Booking(Base):
     budget_min = Column(DECIMAL(10, 2), nullable=False)
     budget_max = Column(DECIMAL(10, 2), nullable=False)
     agreed_amount = Column(DECIMAL(10, 2), nullable=True)
+    negotiated_amount = Column(DECIMAL(10, 2), nullable=True)
+    negotiation_condition = Column(Text, nullable=True)
+    negotiation_status = Column(String(32), nullable=False, default="none", server_default="none")
+    negotiation_last_offer_by = Column(String(16), nullable=True)  # client | artisan
+    artisan_negotiation_rounds_used = Column(Integer, nullable=False, default=0, server_default="0")
+    client_negotiation_rounds_used = Column(Integer, nullable=False, default=0, server_default="0")
+    negotiation_started_at = Column(DateTime(timezone=True), nullable=True)
+    negotiation_updated_at = Column(DateTime(timezone=True), nullable=True)
+    negotiation_agreed_at = Column(DateTime(timezone=True), nullable=True)
+    negotiation_declined_at = Column(DateTime(timezone=True), nullable=True)
+    negotiated_override = Column(Boolean, nullable=False, default=False, server_default="false")
 
     # Status
     status = Column(
@@ -106,8 +117,12 @@ class Booking(Base):
     # Constraints
     __table_args__ = (
         CheckConstraint('budget_max >= budget_min', name='check_budget_range'),
-        CheckConstraint('agreed_amount IS NULL OR (agreed_amount >= budget_min AND agreed_amount <= budget_max)',
-                       name='check_agreed_amount_in_range'),
+        CheckConstraint(
+            'agreed_amount IS NULL OR '
+            '(agreed_amount >= budget_min AND agreed_amount <= budget_max) OR '
+            '(negotiated_override = TRUE)',
+            name='check_agreed_amount_in_range',
+        ),
     )
 
     # Relationships

@@ -108,6 +108,49 @@ class CompleteBookingRequest(BaseModel):
     })
 
 
+class NegotiateBookingRequest(BaseModel):
+    """Request schema for starting/countering booking negotiation"""
+    negotiated_amount: Decimal = Field(..., gt=0, decimal_places=2)
+    negotiation_condition: str = Field(..., min_length=5, max_length=500)
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "negotiated_amount": 10000.00,
+            "negotiation_condition": "Distance and material transport cost are higher."
+        }
+    })
+
+
+class NegotiateResponseRequest(BaseModel):
+    """Request schema for client negotiation response"""
+    action: str = Field(..., pattern="^(agree|counter|decline)$")
+    negotiated_amount: Optional[Decimal] = Field(None, gt=0, decimal_places=2)
+    negotiation_condition: Optional[str] = Field(None, min_length=5, max_length=500)
+
+    @field_validator("action")
+    @classmethod
+    def validate_action(cls, v):
+        return v.lower()
+
+    @field_validator("negotiation_condition")
+    @classmethod
+    def trim_condition(cls, v):
+        return v.strip() if v else v
+
+    @field_validator("negotiated_amount")
+    @classmethod
+    def validate_counter_amount(cls, v):
+        return v
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "action": "counter",
+            "negotiated_amount": 9000.00,
+            "negotiation_condition": "Let's meet halfway due to budget limits."
+        }
+    })
+
+
 class DisputeCompletionRequest(BaseModel):
     """Request schema for customer disputing completion"""
     dispute_reason: str = Field(..., min_length=10, max_length=500)
@@ -155,6 +198,17 @@ class BookingResponse(BaseModel):
     completion_confirmation_deadline_at: Optional[datetime]
     completion_disputed_at: Optional[datetime]
     completion_dispute_reason: Optional[str]
+    negotiated_amount: Optional[Decimal]
+    negotiation_condition: Optional[str]
+    negotiation_status: str
+    negotiation_last_offer_by: Optional[str]
+    artisan_negotiation_rounds_used: int
+    client_negotiation_rounds_used: int
+    negotiation_started_at: Optional[datetime]
+    negotiation_updated_at: Optional[datetime]
+    negotiation_agreed_at: Optional[datetime]
+    negotiation_declined_at: Optional[datetime]
+    negotiated_override: bool
     cancellation_reason: Optional[str]
     rejection_reason: Optional[str]
     created_at: datetime
