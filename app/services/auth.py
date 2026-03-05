@@ -4,7 +4,7 @@ Business logic for user registration, login, and password recovery.
 """
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
-from uuid import UUID
+from uuid import UUID, uuid4
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status, UploadFile
 
@@ -379,7 +379,7 @@ class AuthService:
         google_id: str,
         email: str,
         full_name: str,
-        user_type: str,
+        user_type: Optional[str] = None,
         profile_picture_url: Optional[str] = None,
     ) -> Tuple[str, User, bool]:
         """
@@ -401,11 +401,16 @@ class AuthService:
                 if profile_picture_url and not user.profile_picture_url:
                     user.profile_picture_url = profile_picture_url
             else:
+                if not user_type:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="user_type is required for first-time Google sign-in",
+                    )
                 # Create new user via Google
                 user = User(
                     full_name=full_name,
                     email=email.lower(),
-                    phone_number="",  # Will be updated later if needed
+                    phone_number=f"g{uuid4().hex[:10]}",
                     user_type=UserType(user_type),
                     google_id=google_id,
                     profile_picture_url=profile_picture_url,

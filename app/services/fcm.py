@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 import firebase_admin
 from firebase_admin import credentials, messaging
@@ -42,9 +42,13 @@ def send_to_token(
     title: str,
     body: str,
     data: Optional[Dict[str, str]] = None,
-) -> bool:
+) -> Tuple[bool, bool]:
+    """
+    Returns:
+        (sent_ok, should_deactivate_token)
+    """
     if not _init_firebase():
-        return False
+        return False, False
 
     payload = {str(k): str(v) for k, v in (data or {}).items()}
     message = messaging.Message(
@@ -55,7 +59,19 @@ def send_to_token(
 
     try:
         messaging.send(message)
-        return True
+        return True, False
     except Exception as exc:
-        logger.warning(f"Failed to send FCM to token: {exc}")
-        return False
+        permanent_error = isinstance(
+            exc,
+            (
+                messaging.UnregisteredError,
+                messaging.SenderIdMismatchError,
+            ),
+        ) or (
+            isinstance(exc, messaging.InvalidArgumentError)
+            and "token" in str(exc).lower()
+        )
+        logger.warning(
+            f"Failed to send FCM to token (permanent={permanent_error}): {exc}"
+        )
+        return False, permanent_error

@@ -162,6 +162,28 @@ class DisputeCompletionRequest(BaseModel):
     })
 
 
+class CreateBookingProgressLogRequest(BaseModel):
+    """Request schema for artisan progress logging."""
+    description: str = Field(..., min_length=5, max_length=1000)
+
+    @field_validator("description")
+    @classmethod
+    def trim_description(cls, v):
+        return v.strip()
+
+
+class BookingProgressLogResponse(BaseModel):
+    """Response schema for booking progress logs."""
+    id: int
+    booking_id: int
+    artisan_id: UUID
+    description: str
+    image_url: Optional[str]
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class BookingResponse(BaseModel):
     """Response schema for booking details"""
     id: int
@@ -198,6 +220,7 @@ class BookingResponse(BaseModel):
     completion_confirmation_deadline_at: Optional[datetime]
     completion_disputed_at: Optional[datetime]
     completion_dispute_reason: Optional[str]
+    progress_logs: List[BookingProgressLogResponse] = Field(default_factory=list)
     negotiated_amount: Optional[Decimal]
     negotiation_condition: Optional[str]
     negotiation_status: str

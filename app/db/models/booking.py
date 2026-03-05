@@ -131,6 +131,12 @@ class Booking(Base):
     service = relationship("Service", backref="bookings")
     payment = relationship("Payment", back_populates="booking", uselist=False, cascade="all, delete-orphan")
     review = relationship("Review", back_populates="booking", uselist=False, cascade="all, delete-orphan")
+    progress_logs = relationship(
+        "BookingProgressLog",
+        back_populates="booking",
+        cascade="all, delete-orphan",
+        order_by="BookingProgressLog.created_at.asc()",
+    )
 
     def __repr__(self):
         return f"<Booking {self.booking_reference} ({self.status})>"

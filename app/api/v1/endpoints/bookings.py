@@ -2,7 +2,7 @@
 Booking endpoints for managing service bookings.
 """
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, or_
 from geoalchemy2.elements import WKTElement
@@ -14,6 +14,7 @@ from app.api.deps import get_current_user
 from app.core.config import settings
 from app.db.models.user import User, UserType
 from app.db.models.booking import Booking, BookingStatus
+from app.db.models.booking_progress_log import BookingProgressLog
 from app.db.models.service import Service
 from app.db.models.artisan_profile import ArtisanProfile
 from app.schemas.booking import (
@@ -25,11 +26,13 @@ from app.schemas.booking import (
     NegotiateBookingRequest,
     NegotiateResponseRequest,
     DisputeCompletionRequest,
+    BookingProgressLogResponse,
     BookingResponse,
     BookingListResponse,
     BookingStatsResponse,
 )
 from app.utils.booking_reference import generate_booking_reference
+from app.utils.file_upload import save_booking_progress_image
 from app.tasks.notification_tasks import send_push_notification
 
 
@@ -92,6 +95,19 @@ def _booking_to_response(booking: Booking, db: Session) -> dict:
         except json.JSONDecodeError:
             completion_images = None
 
+    progress_logs = []
+    for log in booking.progress_logs or []:
+        progress_logs.append(
+            {
+                "id": log.id,
+                "booking_id": log.booking_id,
+                "artisan_id": log.artisan_id,
+                "description": log.description,
+                "image_url": log.image_url,
+                "created_at": log.created_at,
+            }
+        )
+
     return {
         "id": booking.id,
         "booking_reference": booking.booking_reference,
@@ -138,6 +154,7 @@ def _booking_to_response(booking: Booking, db: Session) -> dict:
         "completion_confirmation_deadline_at": booking.completion_confirmation_deadline_at,
         "completion_disputed_at": booking.completion_disputed_at,
         "completion_dispute_reason": booking.completion_dispute_reason,
+        "progress_logs": progress_logs,
         "cancellation_reason": booking.cancellation_reason,
         "rejection_reason": booking.rejection_reason,
         "created_at": booking.created_at,
@@ -238,12 +255,14 @@ async def list_bookings(
             joinedload(Booking.customer),
             joinedload(Booking.artisan),
             joinedload(Booking.service),
+            joinedload(Booking.progress_logs),
         ).filter(Booking.customer_id == current_user.id)
     else:
         query = db.query(Booking).options(
             joinedload(Booking.customer),
             joinedload(Booking.artisan),
             joinedload(Booking.service),
+            joinedload(Booking.progress_logs),
         ).filter(Booking.artisan_id == current_user.id)
 
     # Apply status filter
@@ -318,6 +337,7 @@ async def get_booking(
         joinedload(Booking.customer),
         joinedload(Booking.artisan),
         joinedload(Booking.service),
+        joinedload(Booking.progress_logs),
     ).filter(Booking.id == booking_id).first()
     if not booking:
         raise HTTPException(
@@ -740,6 +760,129 @@ async def start_booking(
     return _booking_to_response(booking, db)
 
 
+@router.post(
+    "/{booking_id}/progress-logs",
+    response_model=BookingProgressLogResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_booking_progress_log(
+    booking_id: int,
+    description: str = Form(...),
+    image: Optional[UploadFile] = File(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Artisan logs progress update for a booking.
+
+    Allowed when booking is PAID or IN_PROGRESS. Image is optional.
+    """
+    if current_user.user_type != UserType.ARTISAN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only artisans can log booking progress",
+        )
+
+    description = (description or "").strip()
+    if len(description) < 5:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Progress description must be at least 5 characters",
+        )
+    if len(description) > 1000:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Progress description must not exceed 1000 characters",
+        )
+
+    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    if not booking:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Booking not found",
+        )
+
+    if booking.artisan_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not assigned to this booking",
+        )
+
+    if booking.status not in [BookingStatus.PAID, BookingStatus.IN_PROGRESS]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot log progress for booking in {booking.status.value} status",
+        )
+
+    image_url = None
+    if image is not None:
+        image_url = await save_booking_progress_image(
+            image,
+            str(current_user.id),
+            booking.id,
+        )
+        if not image_url:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to upload progress image",
+            )
+
+    progress_log = BookingProgressLog(
+        booking_id=booking.id,
+        artisan_id=current_user.id,
+        description=description,
+        image_url=image_url,
+    )
+    db.add(progress_log)
+    db.commit()
+    db.refresh(progress_log)
+
+    _notify_user(
+        booking.customer_id,
+        "New job progress",
+        "Artisan posted a new progress update on your booking.",
+        {"booking_id": str(booking.id), "event": "progress_logged"},
+    )
+
+    return progress_log
+
+
+@router.get(
+    "/{booking_id}/progress-logs",
+    response_model=List[BookingProgressLogResponse],
+)
+async def list_booking_progress_logs(
+    booking_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    List booking progress logs.
+
+    Visible to customer and artisan involved in the booking.
+    """
+    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    if not booking:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Booking not found",
+        )
+
+    if booking.customer_id != current_user.id and booking.artisan_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to view this booking progress",
+        )
+
+    logs = (
+        db.query(BookingProgressLog)
+        .filter(BookingProgressLog.booking_id == booking.id)
+        .order_by(BookingProgressLog.created_at.asc())
+        .all()
+    )
+    return logs
+
+
 @router.patch("/{booking_id}/complete", response_model=BookingResponse)
 async def complete_booking(
     booking_id: int,
@@ -778,6 +921,15 @@ async def complete_booking(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Cannot complete booking in {booking.status.value} status"
+        )
+
+    progress_count = db.query(func.count(BookingProgressLog.id)).filter(
+        BookingProgressLog.booking_id == booking.id
+    ).scalar() or 0
+    if progress_count < 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Log at least one progress update before completing this booking",
         )
 
     # Update booking

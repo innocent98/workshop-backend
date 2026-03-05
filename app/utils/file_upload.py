@@ -306,6 +306,55 @@ async def save_portfolio_image(file: UploadFile, artisan_id: str) -> Optional[st
         return None
 
 
+async def save_booking_progress_image(
+    file: UploadFile,
+    artisan_id: str,
+    booking_id: int,
+) -> Optional[str]:
+    """
+    Save booking progress image for artisan.
+
+    Args:
+        file: Uploaded image file
+        artisan_id: Artisan ID for unique naming
+        booking_id: Booking ID for folder grouping
+
+    Returns:
+        URL to saved image, or None if failed
+    """
+    try:
+        validate_image_file(file)
+        content = await file.read()
+
+        max_progress_size = 10 * 1024 * 1024  # 10MB
+        if len(content) > max_progress_size:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="File size exceeds 10MB limit for progress images"
+            )
+
+        image, img_format = process_image(content, max_dimension=1920)
+        unique_id = f"{artisan_id}_{booking_id}_{uuid.uuid4().hex}"
+
+        if settings.USE_CLOUDINARY and settings.CLOUDINARY_CLOUD_NAME:
+            folder = f"{settings.CLOUDINARY_FOLDER}/progress_logs/{booking_id}"
+            image_url = await upload_to_cloudinary(image, img_format, folder, unique_id)
+        else:
+            file_ext = os.path.splitext(file.filename)[1].lower()
+            filename = f"{unique_id}{file_ext}"
+            image_url = await save_to_local(image, img_format, filename, "progress_logs")
+
+        logger.info(
+            f"Progress image saved for artisan {artisan_id}, booking {booking_id}: {image_url}"
+        )
+        return image_url
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to save progress image: {str(e)}")
+        return None
+
+
 async def delete_image(image_url: str) -> bool:
     """
     Delete image from storage (Cloudinary or local).

@@ -146,7 +146,7 @@ class LoginResponse(BaseModel):
 class GoogleSignInRequest(BaseModel):
     """Google Sign-In"""
     google_token: str
-    user_type: str = Field(..., pattern="^(artisan|client)$")
+    user_type: Optional[str] = Field(None, pattern="^(artisan|client)$")
 
 
 class GoogleSignInResponse(BaseModel):

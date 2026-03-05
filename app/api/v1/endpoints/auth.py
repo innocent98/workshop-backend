@@ -7,6 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File,
 from sqlalchemy.orm import Session
 from slowapi import Limiter
 from slowapi.util import get_remote_address
+import firebase_admin
+from firebase_admin import auth as firebase_auth, credentials
 
 from app.db.session import get_db
 from app.services.auth import AuthService
@@ -43,6 +45,7 @@ from app.core.logger import log
 from app.api.deps import get_current_user
 from app.core.token_blacklist import blacklist_token
 from app.db.models.user import User
+from app.core.config import settings
 
 
 router = APIRouter()
@@ -262,16 +265,49 @@ def google_sign_in(
     Sign in with Google OAuth.
     Creates new user if doesn't exist, otherwise logs in.
     """
-    # TODO: Verify Google token and extract user info
-    # For now, this is a placeholder. In production:
-    # 1. Verify google_token with Google API
-    # 2. Extract user info (google_id, email, name, picture)
-    # 3. Call AuthService.google_sign_in with extracted info
+    if not settings.FCM_SERVICE_ACCOUNT_FILE:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Firebase service account is not configured",
+        )
 
-    # Placeholder implementation
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Google Sign-In will be implemented with Google OAuth integration"
+    try:
+        if not firebase_admin._apps:
+            cred = credentials.Certificate(settings.FCM_SERVICE_ACCOUNT_FILE)
+            firebase_admin.initialize_app(cred)
+
+        claims = firebase_auth.verify_id_token(request.google_token)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid Google token",
+        )
+
+    google_id = claims.get("uid")
+    email = claims.get("email")
+    full_name = claims.get("name") or (email.split("@")[0] if email else "Google User")
+    picture = claims.get("picture")
+
+    if not google_id or not email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Google token is missing required user identity fields",
+        )
+
+    access_token, user, is_new_user = AuthService.google_sign_in(
+        db=db,
+        google_id=google_id,
+        email=email,
+        full_name=full_name,
+        user_type=request.user_type,
+        profile_picture_url=picture,
+    )
+
+    return GoogleSignInResponse(
+        message="Google sign-in successful",
+        token=access_token,
+        is_new_user=is_new_user,
+        user=UserResponse.model_validate(user),
     )
 
 

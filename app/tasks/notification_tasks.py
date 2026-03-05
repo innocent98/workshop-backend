@@ -5,6 +5,7 @@ from app.celery_app import celery_app
 from app.core.logger import logger
 from app.db.session import SessionLocal
 from app.db.models.push_device import PushDevice
+from app.db.models.user_notification import UserNotification
 from app.services.fcm import send_to_token
 
 
@@ -31,11 +32,23 @@ def send_push_notification(
     db = SessionLocal()
     try:
         logger.info(f"Sending push notification to user {user_id}: {title}")
+        normalized_data = {str(k): str(v) for k, v in (data or {}).items()}
+        event_type = normalized_data.get("event")
+        db.add(
+            UserNotification(
+                user_id=user_id,
+                title=title,
+                body=body,
+                event_type=event_type,
+                payload=normalized_data or None,
+            )
+        )
         devices = db.query(PushDevice).filter(
             PushDevice.user_id == user_id,
             PushDevice.is_active.is_(True),
         ).all()
         if not devices:
+            db.commit()
             return {
                 "status": "success",
                 "user_id": user_id,
@@ -46,18 +59,19 @@ def send_push_notification(
         sent = 0
         failed = 0
         for device in devices:
-            ok = send_to_token(
+            ok, should_deactivate = send_to_token(
                 token=device.fcm_token,
                 title=title,
                 body=body,
-                data={str(k): str(v) for k, v in (data or {}).items()},
+                data=normalized_data,
             )
             if ok:
                 sent += 1
             else:
                 failed += 1
-                # Disable token after consistent send failure; client will re-register on next login/app launch.
-                device.is_active = False
+                # Disable only permanently invalid tokens; keep transient failures active.
+                if should_deactivate:
+                    device.is_active = False
 
         db.commit()
         return {

@@ -9,7 +9,9 @@ from app.db.models.portfolio import Portfolio
 from app.db.models.booking import Booking, BookingStatus
 from app.db.models.payment import Payment, PaymentStatus, PaymentMethod
 from app.db.models.review import Review
+from app.db.models.booking_progress_log import BookingProgressLog
 from app.db.models.push_device import PushDevice, PushPlatform
+from app.db.models.user_notification import UserNotification
 
 __all__ = [
     "User",
@@ -29,6 +31,8 @@ __all__ = [
     "PaymentStatus",
     "PaymentMethod",
     "Review",
+    "BookingProgressLog",
     "PushDevice",
     "PushPlatform",
+    "UserNotification",
 ]

@@ -16,7 +16,9 @@ def import_models():
         ArtisanProfile,
         Portfolio,
         Booking,
+        BookingProgressLog,
         Payment,
         Review,
         PushDevice,
+        UserNotification,
     )
