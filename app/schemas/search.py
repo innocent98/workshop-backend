@@ -95,6 +95,7 @@ class ArtisanSearchResult(BaseModel):
 
     # Services offered
     services: List[str] = Field(default_factory=list, description="List of service names")
+    category_name: Optional[str] = Field(None, description="Primary selected service category name")
 
     # Recent portfolio sample
     portfolio_sample: Optional[str] = Field(None, description="URL of a recent portfolio image")

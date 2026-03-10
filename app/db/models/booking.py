@@ -62,6 +62,7 @@ class Booking(Base):
 
     # Job Details
     job_description = Column(Text, nullable=True)
+    selected_service_ids = Column(Text, nullable=True)  # JSON array of service IDs
     job_date = Column(DateTime(timezone=True), nullable=False)
     job_location = Column(Geography(geometry_type='POINT', srid=4326), nullable=False)
     job_address = Column(String(500), nullable=False)

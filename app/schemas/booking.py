@@ -1,14 +1,15 @@
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional, List
-from pydantic import BaseModel, Field, field_validator, ConfigDict
+from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
 from uuid import UUID
 
 
 class CreateBookingRequest(BaseModel):
     """Request schema for creating a new booking"""
     artisan_id: UUID
-    service_id: int
+    service_id: Optional[int] = None
+    service_ids: Optional[List[int]] = None
     job_description: Optional[str] = None
     job_date: datetime
     job_address: str = Field(..., min_length=5, max_length=500)
@@ -35,10 +36,27 @@ class CreateBookingRequest(BaseModel):
             raise ValueError('job_date cannot be in the past')
         return v
 
+    @field_validator('service_ids')
+    @classmethod
+    def validate_service_ids(cls, v):
+        if v is None:
+            return v
+        if not v:
+            raise ValueError('service_ids must contain at least one service')
+        deduped = list(dict.fromkeys(v))
+        return deduped
+
+    @model_validator(mode='after')
+    def validate_service_selection(self):
+        if (self.service_ids is None or len(self.service_ids) == 0) and self.service_id is None:
+            raise ValueError('Either service_id or service_ids must be provided')
+        return self
+
     model_config = ConfigDict(json_schema_extra={
         "example": {
             "artisan_id": "123e4567-e89b-12d3-a456-426614174000",
             "service_id": 1,
+            "service_ids": [1, 2],
             "job_description": "Need plumbing repair in kitchen",
             "job_date": "2025-02-15T10:00:00Z",
             "job_address": "123 Main Street, Lagos, Nigeria",
@@ -191,6 +209,8 @@ class BookingResponse(BaseModel):
     customer_id: UUID
     artisan_id: UUID
     service_id: int
+    selected_service_ids: List[int] = Field(default_factory=list)
+    selected_service_names: List[str] = Field(default_factory=list)
     customer_name: Optional[str] = None
     customer_profile_picture_url: Optional[str] = None
     customer_phone_number: Optional[str] = None

@@ -267,3 +267,20 @@ class ErrorResponse(BaseModel):
     success: bool = False
     message: str
     detail: Optional[str] = None
+
+
+class UpdateMyServicesRequest(BaseModel):
+    """Update current authenticated user's selected services."""
+    services: List[str] = Field(..., min_length=1)
+
+    @field_validator('services')
+    @classmethod
+    def validate_services(cls, v: List[str]) -> List[str]:
+        if not v:
+            raise ValueError('At least one service must be selected')
+        return v
+
+
+class MyServicesResponse(BaseModel):
+    """Current authenticated user's selected services."""
+    services: List[str]

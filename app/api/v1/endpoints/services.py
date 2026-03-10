@@ -94,6 +94,7 @@ def get_services(
     skip: int = 0,
     limit: int = 100,
     category_id: int = None,
+    include_uncategorized: bool = False,
     db: Session = Depends(get_db)
 ):
     """
@@ -103,12 +104,16 @@ def get_services(
     - skip: Number of records to skip (pagination)
     - limit: Maximum number of records to return
     - category_id: Filter by category ID (optional)
+    - include_uncategorized: Include legacy uncategorized services (default: false)
     """
     try:
         query = db.query(Service)
 
         if category_id:
             query = query.filter(Service.category_id == category_id)
+        elif not include_uncategorized:
+            # Hide legacy records from client apps while preserving historical references.
+            query = query.filter(Service.category_id.isnot(None))
 
         services = query.order_by(Service.name)\
             .offset(skip)\

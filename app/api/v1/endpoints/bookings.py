@@ -15,7 +15,7 @@ from app.core.config import settings
 from app.db.models.user import User, UserType
 from app.db.models.booking import Booking, BookingStatus
 from app.db.models.booking_progress_log import BookingProgressLog
-from app.db.models.service import Service
+from app.db.models.service import Service, UserService
 from app.db.models.artisan_profile import ArtisanProfile
 from app.schemas.booking import (
     CreateBookingRequest,
@@ -108,12 +108,39 @@ def _booking_to_response(booking: Booking, db: Session) -> dict:
             }
         )
 
+    selected_service_ids = []
+    selected_service_names = []
+    if booking.selected_service_ids:
+        try:
+            selected_service_ids = json.loads(booking.selected_service_ids)
+            if not isinstance(selected_service_ids, list):
+                selected_service_ids = []
+        except json.JSONDecodeError:
+            selected_service_ids = []
+
+    if selected_service_ids:
+        selected_services = (
+            db.query(Service.id, Service.name)
+            .filter(Service.id.in_(selected_service_ids))
+            .all()
+        )
+        by_id = {sid: name for sid, name in selected_services}
+        selected_service_names = [
+            by_id[sid] for sid in selected_service_ids if sid in by_id
+        ]
+    elif booking.service_id:
+        selected_service_ids = [booking.service_id]
+        if booking.service:
+            selected_service_names = [booking.service.name]
+
     return {
         "id": booking.id,
         "booking_reference": booking.booking_reference,
         "customer_id": booking.customer_id,
         "artisan_id": booking.artisan_id,
         "service_id": booking.service_id,
+        "selected_service_ids": selected_service_ids,
+        "selected_service_names": selected_service_names,
         "customer_name": booking.customer.full_name if booking.customer else None,
         "customer_profile_picture_url": booking.customer.profile_picture_url if booking.customer else None,
         "customer_phone_number": booking.customer.phone_number if booking.customer else None,
@@ -192,12 +219,42 @@ async def create_booking(
             detail="Artisan not found or inactive"
         )
 
-    # Verify service exists
-    service = db.query(Service).filter(Service.id == request.service_id).first()
-    if not service:
+    requested_service_ids = request.service_ids or (
+        [request.service_id] if request.service_id is not None else []
+    )
+    requested_service_ids = list(dict.fromkeys(requested_service_ids))
+    if not requested_service_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one service must be selected",
+        )
+
+    selected_services = (
+        db.query(Service)
+        .filter(Service.id.in_(requested_service_ids))
+        .all()
+    )
+    if len(selected_services) != len(requested_service_ids):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Service not found"
+            detail="One or more selected services were not found",
+        )
+
+    artisan_service_ids = {
+        service_id
+        for (service_id,) in db.query(UserService.service_id)
+        .filter(UserService.user_id == artisan.id)
+        .all()
+    }
+    if not artisan_service_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Artisan has no configured services",
+        )
+    if not set(requested_service_ids).issubset(artisan_service_ids):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Selected services must be offered by this artisan",
         )
 
     # Generate booking reference
@@ -211,7 +268,8 @@ async def create_booking(
         booking_reference=booking_reference,
         customer_id=current_user.id,
         artisan_id=request.artisan_id,
-        service_id=request.service_id,
+        service_id=requested_service_ids[0],
+        selected_service_ids=json.dumps(requested_service_ids),
         job_description=request.job_description,
         job_date=request.job_date,
         job_location=job_location,
@@ -228,7 +286,7 @@ async def create_booking(
     _notify_user(
         artisan.id,
         "New booking request",
-        f"{current_user.full_name} requested {service.name}.",
+        f"{current_user.full_name} requested {', '.join([s.name for s in selected_services])}.",
         {"booking_id": str(booking.id), "event": "booking_created"},
     )
 

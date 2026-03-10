@@ -40,11 +40,14 @@ from app.schemas.auth import (
     ResendOTPRequest,
     ResendOTPResponse,
     LogoutResponse,
+    UpdateMyServicesRequest,
+    MyServicesResponse,
 )
 from app.core.logger import log
 from app.api.deps import get_current_user
 from app.core.token_blacklist import blacklist_token
 from app.db.models.user import User
+from app.db.models.service import UserService, Service
 from app.core.config import settings
 
 
@@ -309,6 +312,44 @@ def google_sign_in(
         is_new_user=is_new_user,
         user=UserResponse.model_validate(user),
     )
+
+
+@router.get(
+    "/me/services",
+    response_model=MyServicesResponse,
+    summary="Get current user's selected services",
+)
+def get_my_services(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    services = (
+        db.query(Service.name)
+        .join(UserService, UserService.service_id == Service.id)
+        .filter(UserService.user_id == current_user.id)
+        .order_by(Service.name)
+        .all()
+    )
+    return MyServicesResponse(services=[row[0] for row in services])
+
+
+@router.put(
+    "/me/services",
+    response_model=MyServicesResponse,
+    summary="Replace current user's selected services",
+)
+def replace_my_services(
+    body: UpdateMyServicesRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    AuthService.select_user_services(
+        db=db,
+        user_id=str(current_user.id),
+        user_type=current_user.user_type.value,
+        service_ids=body.services,
+    )
+    return MyServicesResponse(services=body.services)
 
 
 # ============================================================================

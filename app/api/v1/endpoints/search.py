@@ -204,6 +204,15 @@ def search_artisans(
         ).all()
         service_names = [s.name for s in services]
 
+        categories = db.query(ServiceCategory.name).join(
+            Service, Service.category_id == ServiceCategory.id
+        ).join(
+            UserService, UserService.service_id == Service.id
+        ).filter(
+            UserService.user_id == user.id
+        ).order_by(ServiceCategory.display_order, ServiceCategory.name).all()
+        category_name = categories[0].name if categories else None
+
         # Get a portfolio sample
         portfolio_sample = db.query(Portfolio.image_url).filter(
             Portfolio.artisan_id == user.id
@@ -228,6 +237,7 @@ def search_artisans(
             acceptance_rate=artisan_profile.acceptance_rate,
             distance_km=round(distance_km, 2),
             services=service_names,
+            category_name=category_name,
             portfolio_sample=portfolio_sample.image_url if portfolio_sample else None
         ))
 
