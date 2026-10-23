@@ -8,6 +8,7 @@ class WalletBalanceResponse(BaseModel):
     """Response schema for wallet balance/earnings summary"""
     total_earned: Decimal  # Total amount released to artisan
     pending_release: Decimal  # Payments that are SUCCESS but not yet RELEASED
+    total_platform_fee: Decimal  # Total Workchop commission on released + pending-release
     total_jobs_completed: int  # Total completed jobs
     total_jobs_paid: int  # Total paid jobs
     lifetime_earnings: Decimal  # All-time earnings
@@ -16,6 +17,7 @@ class WalletBalanceResponse(BaseModel):
         "example": {
             "total_earned": 125000.00,
             "pending_release": 25000.00,
+            "total_platform_fee": 15000.00,
             "total_jobs_completed": 15,
             "total_jobs_paid": 12,
             "lifetime_earnings": 125000.00
@@ -30,6 +32,8 @@ class EarningItemResponse(BaseModel):
     booking_id: int
     booking_reference: str
     amount: Decimal
+    gross_amount: Decimal
+    platform_fee: Decimal
     status: str  # Payment status
     customer_name: str
     service_name: Optional[str]
@@ -56,6 +60,8 @@ class PayoutItemResponse(BaseModel):
     payment_reference: str
     payout_reference: Optional[str]
     amount: Decimal
+    gross_amount: Decimal
+    platform_fee: Decimal
     released_at: Optional[datetime]
     booking_reference: str
     customer_name: str

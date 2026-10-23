@@ -54,7 +54,9 @@ class Payment(Base):
 
     # Payment Details
     authorization_url = Column(String(500), nullable=True)
-    amount = Column(DECIMAL(10, 2), nullable=False)
+    amount = Column(DECIMAL(10, 2), nullable=False)  # Gross amount paid by customer
+    platform_fee = Column(DECIMAL(10, 2), nullable=False, default=0)
+    artisan_amount = Column(DECIMAL(10, 2), nullable=False, default=0)
     currency = Column(String(3), nullable=False, default="NGN")
     payment_method = Column(
         SQLEnum(PaymentMethod, values_callable=lambda x: [e.value for e in x]),

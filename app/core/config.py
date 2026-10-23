@@ -1,4 +1,5 @@
 from typing import List, Optional, Any, Dict
+from decimal import Decimal
 from pydantic import AnyHttpUrl, field_validator, EmailStr
 from pydantic_settings import BaseSettings
 
@@ -76,6 +77,7 @@ class Settings(BaseSettings):
 
     # Booking completion confirmation / payout hold window
     COMPLETION_DISPUTE_WINDOW_HOURS: int = 24
+    PLATFORM_COMMISSION_PERCENT: Decimal = Decimal("10.00")
 
     # Push notifications (Firebase Cloud Messaging)
     FCM_ENABLED: bool = True

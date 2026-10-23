@@ -22,6 +22,8 @@ class InitializePaymentResponse(BaseModel):
     booking_id: int
     authorization_url: str
     amount: Decimal
+    platform_fee: Decimal
+    artisan_amount: Decimal
     status: str
     created_at: datetime
 
@@ -32,6 +34,8 @@ class InitializePaymentResponse(BaseModel):
             "booking_id": 1,
             "authorization_url": "https://checkout.paystack.com/xxxxxxxxx",
             "amount": 7500.00,
+            "platform_fee": 750.00,
+            "artisan_amount": 6750.00,
             "status": "pending",
             "created_at": "2025-01-31T10:00:00Z"
         }
@@ -46,6 +50,8 @@ class PaymentResponse(BaseModel):
     booking_id: int
     authorization_url: Optional[str]
     amount: Decimal
+    platform_fee: Decimal
+    artisan_amount: Decimal
     currency: str
     payment_method: Optional[str]
     status: str

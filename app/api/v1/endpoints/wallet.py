@@ -130,7 +130,7 @@ async def get_wallet_balance(
     booking_ids = [b.id for b in artisan_bookings]
 
     # Get total earned (RELEASED payments)
-    total_earned = db.query(func.sum(Payment.amount)).filter(
+    total_earned = db.query(func.sum(Payment.artisan_amount)).filter(
         and_(
             Payment.booking_id.in_(booking_ids) if booking_ids else False,
             Payment.status == PaymentStatus.RELEASED
@@ -142,7 +142,7 @@ async def get_wallet_balance(
     # - booking completed
     # - not disputed
     # - client confirmed OR dispute window elapsed
-    pending_release = db.query(func.sum(Payment.amount)).filter(
+    pending_release = db.query(func.sum(Payment.artisan_amount)).filter(
         and_(
             Payment.booking_id.in_(booking_ids) if booking_ids else False,
             Payment.status == PaymentStatus.SUCCESS,
@@ -157,6 +157,13 @@ async def get_wallet_balance(
                     ),
                 )
             ),
+        )
+    ).scalar() or Decimal(0)
+
+    total_platform_fee = db.query(func.sum(Payment.platform_fee)).filter(
+        and_(
+            Payment.booking_id.in_(booking_ids) if booking_ids else False,
+            Payment.status.in_([PaymentStatus.SUCCESS, PaymentStatus.RELEASED]),
         )
     ).scalar() or Decimal(0)
 
@@ -182,6 +189,7 @@ async def get_wallet_balance(
     return {
         "total_earned": total_earned,
         "pending_release": pending_release,
+        "total_platform_fee": total_platform_fee,
         "total_jobs_completed": total_jobs_completed,
         "total_jobs_paid": total_jobs_paid,
         "lifetime_earnings": lifetime_earnings
@@ -254,7 +262,9 @@ async def get_earnings_history(
             "payment_reference": payment.payment_reference,
             "booking_id": booking.id,
             "booking_reference": booking.booking_reference,
-            "amount": payment.amount,
+            "amount": payment.artisan_amount,
+            "gross_amount": payment.amount,
+            "platform_fee": payment.platform_fee,
             "status": payment.status.value,
             "customer_name": customer.full_name if customer else "Unknown",
             "service_name": service.name if service else None,
@@ -265,7 +275,7 @@ async def get_earnings_history(
         })
 
         if payment.status in [PaymentStatus.SUCCESS, PaymentStatus.RELEASED]:
-            total_amount += payment.amount
+            total_amount += payment.artisan_amount
 
     return {
         "earnings": earnings,
@@ -333,7 +343,9 @@ async def get_payout_history(
             "payment_id": payment.id,
             "payment_reference": payment.payment_reference,
             "payout_reference": payment.payout_reference,
-            "amount": payment.amount,
+            "amount": payment.artisan_amount,
+            "gross_amount": payment.amount,
+            "platform_fee": payment.platform_fee,
             "released_at": payment.released_at,
             "booking_reference": booking.booking_reference,
             "customer_name": customer.full_name if customer else "Unknown"
@@ -388,7 +400,7 @@ async def get_wallet_stats(
             "total_transactions": 0
         }
 
-    amounts = [float(p.amount) for p in successful_payments]
+    amounts = [float(p.artisan_amount) for p in successful_payments]
 
     return {
         "total_earnings": str(sum(amounts)),
@@ -439,7 +451,7 @@ async def request_payout(
     # - booking is COMPLETED,
     # - not disputed,
     # - and either client-confirmed or dispute window has elapsed.
-    available_balance = db.query(func.sum(Payment.amount)).filter(
+    available_balance = db.query(func.sum(Payment.artisan_amount)).filter(
         and_(
             Payment.booking_id.in_(booking_ids) if booking_ids else False,
             Payment.status == PaymentStatus.SUCCESS,
@@ -512,18 +524,18 @@ async def request_payout(
             if total_released >= request.amount:
                 break
 
-            amount_to_release = min(payment.amount, request.amount - total_released)
+            amount_to_release = min(payment.artisan_amount, request.amount - total_released)
 
             # For simplicity, we'll release full payments
             # In production, you might want to support partial releases
-            if payment.amount <= (request.amount - total_released):
+            if payment.artisan_amount <= (request.amount - total_released):
                 # Generate payout reference
                 payout_reference = f"PAYOUT-{payment.payment_reference}"
 
                 # Initiate transfer
                 transfer = PaystackService.initiate_transfer(
                     recipient_code=recipient_code,
-                    amount=payment.amount,
+                    amount=payment.artisan_amount,
                     reason=f"Payout for booking {payment.booking.booking_reference}",
                     reference=payout_reference
                 )
@@ -534,7 +546,7 @@ async def request_payout(
                 payment.payout_reference = payout_reference
                 payment.payout_response = json.dumps(transfer)
 
-                total_released += payment.amount
+                total_released += payment.artisan_amount
                 released_payment_ids.append(payment.id)
 
         db.commit()

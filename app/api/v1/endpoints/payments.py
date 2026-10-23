@@ -7,9 +7,11 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 import json
 from datetime import datetime
+from decimal import Decimal
 
 from app.db.session import get_db
 from app.api.deps import get_current_user
+from app.core.config import settings
 from app.db.models.user import User, UserType
 from app.db.models.booking import Booking, BookingStatus
 from app.db.models.payment import Payment, PaymentStatus, PaymentMethod
@@ -22,11 +24,24 @@ from app.schemas.payment import (
     VerifyPaymentResponse,
 )
 from app.utils.payment_reference import generate_payment_reference
+from app.utils.commission import calculate_artisan_amount, calculate_platform_fee
 from app.services.paystack import PaystackService, PaystackError
 from app.tasks.notification_tasks import send_push_notification
 
 
 router = APIRouter()
+
+
+def _payment_split(gross_amount: Decimal) -> tuple[Decimal, Decimal]:
+    platform_fee = calculate_platform_fee(
+        gross_amount,
+        settings.PLATFORM_COMMISSION_PERCENT,
+    )
+    artisan_amount = calculate_artisan_amount(
+        gross_amount,
+        settings.PLATFORM_COMMISSION_PERCENT,
+    )
+    return platform_fee, artisan_amount
 
 def _notify_user(user_id, title: str, body: str, data: Optional[dict] = None) -> None:
     try:
@@ -103,6 +118,8 @@ async def initialize_payment(
                 "booking_id": existing_payment.booking_id,
                 "authorization_url": existing_payment.authorization_url,
                 "amount": existing_payment.amount,
+                "platform_fee": existing_payment.platform_fee,
+                "artisan_amount": existing_payment.artisan_amount,
                 "status": existing_payment.status.value,
                 "created_at": existing_payment.created_at,
             }
@@ -141,6 +158,8 @@ async def initialize_payment(
         if paystack_response is None:
             raise last_paystack_error or PaystackError("Transaction initialization failed")
 
+        platform_fee, artisan_amount = _payment_split(booking.agreed_amount)
+
         # If an existing failed/refunded record exists, reuse it for a new checkout attempt.
         if existing_payment and existing_payment.status in [PaymentStatus.FAILED, PaymentStatus.REFUNDED]:
             existing_payment.payment_reference = payment_reference
@@ -148,6 +167,8 @@ async def initialize_payment(
             existing_payment.paystack_access_code = paystack_response.get('access_code')
             existing_payment.authorization_url = paystack_response.get('authorization_url')
             existing_payment.amount = booking.agreed_amount
+            existing_payment.platform_fee = platform_fee
+            existing_payment.artisan_amount = artisan_amount
             existing_payment.currency = "NGN"
             existing_payment.status = PaymentStatus.PENDING
             existing_payment.customer_email = current_user.email
@@ -170,6 +191,8 @@ async def initialize_payment(
                 booking_id=booking.id,
                 authorization_url=paystack_response.get('authorization_url'),
                 amount=booking.agreed_amount,
+                platform_fee=platform_fee,
+                artisan_amount=artisan_amount,
                 currency="NGN",
                 status=PaymentStatus.PENDING,
                 customer_email=current_user.email,
@@ -187,6 +210,8 @@ async def initialize_payment(
             "booking_id": payment.booking_id,
             "authorization_url": payment.authorization_url,
             "amount": payment.amount,
+            "platform_fee": payment.platform_fee,
+            "artisan_amount": payment.artisan_amount,
             "status": payment.status.value,
             "created_at": payment.created_at
         }
@@ -237,6 +262,11 @@ async def verify_payment(
             detail="You don't have permission to verify this payment"
         )
     if payment.status in [PaymentStatus.SUCCESS, PaymentStatus.RELEASED]:
+        if payment.platform_fee is None or payment.artisan_amount is None:
+            platform_fee, artisan_amount = _payment_split(payment.amount)
+            payment.platform_fee = platform_fee
+            payment.artisan_amount = artisan_amount
+            db.commit()
         return {
             "payment_reference": payment.payment_reference,
             "status": payment.status.value,
@@ -509,6 +539,10 @@ async def release_payment(
         #     transfer_response = PaystackService.initiate_transfer(...)
 
         # For now, just mark as released
+        if payment.platform_fee is None or payment.artisan_amount is None:
+            platform_fee, artisan_amount = _payment_split(payment.amount)
+            payment.platform_fee = platform_fee
+            payment.artisan_amount = artisan_amount
         payment.status = PaymentStatus.RELEASED
         payment.released_at = datetime.utcnow()
         payment.payout_reference = f"PAYOUT-{payment.payment_reference}"
