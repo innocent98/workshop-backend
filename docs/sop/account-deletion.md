@@ -21,7 +21,8 @@ bookings, payments and withdrawals must remain for accounting and cascade from `
 | Pending bookings | closed automatically (customer's -> cancelled, artisan's -> rejected) and the other side notified: they hold no money | Blocking on them: it would trap users behind requests nobody answers |
 | Admins | cannot self-delete (409 `admin_account`) | Lock-out / abuse of the admin role |
 | Audit | `admin_audit_logs` row `user.self_delete` with the user as actor; details hold no personal data (user type, count of closed pending bookings) | Logging the email/name |
-| Race safety | the user row is locked (`FOR UPDATE`) while blockers are checked and the account is anonymised, in one transaction | Check-then-act without a lock |
+| Race safety | the user row is locked, then `delete_account` locks the user's bookings, withdrawals and payments (`FOR UPDATE`) and **re-checks the blockers under those locks** before anonymising, all in one transaction (it raises `DeletionBlocked` and changes nothing if any appeared). Withdrawals lock the same user row and payment rows, so they serialise with deletion. Residual gap: a booking *accept* that does not lock the booking row could still interleave in the same millisecond window; the deleted artisan's token is dead right after, but such a booking could be left accepted for a deleted artisan until the customer cancels or an admin intervenes (not exercised; making the booking endpoints lock the row is a follow-up) | Check-then-act without a lock (flagged by the automated review) |
+| Storage deletes | only images THIS app uploaded for THIS user are deleted: Cloudinary URL on `res.cloudinary.com` + our cloud name + `<folder>/(profile_pictures\|portfolio)/`, or `/static/(profile_pictures\|portfolio)/`, no `..`, and the file stem must start with `<user_id>_` (our upload naming). Google profile pictures, foreign URLs and other users' files are skipped (rows are still removed) | Passing stored URLs straight to `delete_image` (it deletes anything containing `cloudinary.com`, or a relative path) |
 | Rate limit | 10 / 15 min / IP via the shared limiter, so the password step cannot be brute-forced from a stolen token | none |
 
 ## What is removed vs kept
@@ -39,7 +40,7 @@ bookings, payments and withdrawals must remain for accounting and cascade from `
 `alembic/versions/d3f5a7c9e1b2_add_users_deleted_at.py` (down_revision `b8e1c4a7d2f3`), `tests/api/test_account_deletion.py`.
 
 ## Verification
-* 25 tests (`tests/api/test_account_deletion.py`, scratch PostGIS + Redis): auth, re-auth (password and Google paths),
+* 28 tests (`tests/api/test_account_deletion.py`, scratch PostGIS + Redis): auth, re-auth (password and Google paths),
   anonymisation + kept financial rows, token revocation (including a second token), re-registration with the same
   email/phone, every blocker and the combined list, settled history not blocking, pending bookings closed, artisan
   portfolio/profile scrub. Migration: single head, upgrade/downgrade/upgrade round trip.

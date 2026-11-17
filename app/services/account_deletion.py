@@ -15,10 +15,12 @@ counterparty's records and disputes; a legal-retention decision, see the SOP).
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import List
+from urllib.parse import urlparse
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.logger import logger
 from app.db.models.admin import AdminAuditLog
 from app.db.models.artisan_profile import ArtisanProfile, AvailabilityStatus
@@ -47,6 +49,50 @@ BLOCKER_MESSAGES = {
     "unfinished_withdrawal": "A withdrawal is still being processed. Wait for it to finish first.",
     "wallet_balance": "Withdraw your earnings first (money awaiting confirmation counts too).",
 }
+
+
+class DeletionBlocked(Exception):
+    def __init__(self, blockers: List[dict]):
+        super().__init__("account deletion blocked")
+        self.blockers = blockers
+
+
+_UPLOAD_SUBFOLDERS = ("profile_pictures", "portfolio")
+
+
+def is_own_upload(url: str, user_id) -> bool:
+    """
+    True only for an image THIS app uploaded for THIS user. Uploads are named ``<user_id>_<uuid>``
+    inside ``<CLOUDINARY_FOLDER>/(profile_pictures|portfolio)`` (Cloudinary) or under
+    ``/static/(profile_pictures|portfolio)/`` (local). Anything else (a Google profile picture, a
+    foreign URL, a path with ``..``) is never passed to the storage delete.
+    """
+    if not url or ".." in url or "\\" in url:
+        return False
+    parsed = urlparse(url)
+    segments = [seg for seg in parsed.path.split("/") if seg]
+    if parsed.scheme in ("http", "https"):
+        cloud = settings.CLOUDINARY_CLOUD_NAME
+        if (
+            parsed.netloc != "res.cloudinary.com"
+            or not cloud
+            or not segments
+            or segments[0] != cloud
+        ):
+            return False
+        folder = settings.CLOUDINARY_FOLDER
+        if folder not in segments:
+            return False
+        after = segments[segments.index(folder) + 1 :]
+        if len(after) < 2 or after[0] not in _UPLOAD_SUBFOLDERS:
+            return False
+    elif not parsed.scheme and not parsed.netloc and url.startswith("/static/"):
+        if len(segments) < 3 or segments[1] not in _UPLOAD_SUBFOLDERS:
+            return False
+    else:
+        return False
+    stem = segments[-1].rsplit(".", 1)[0]
+    return stem.startswith(f"{user_id}_")
 
 
 def find_blockers(db: Session, user: User) -> List[dict]:
@@ -98,13 +144,30 @@ def find_blockers(db: Session, user: User) -> List[dict]:
 
 def delete_account(db: Session, user: User) -> dict:
     """
-    Anonymise ``user`` (caller has locked the row, checked blockers and re-authenticated).
-    Commits. Returns ``{"image_urls": [...], "notify": [(user_id, title, body, data), ...]}`` so the
-    caller can delete stored images and send notifications after the commit.
+    Anonymise ``user`` (caller has re-authenticated and locked the user row). Re-checks the blockers
+    under row locks and raises ``DeletionBlocked`` (after a rollback) if any. Commits. Returns
+    ``{"image_urls": [...], "notify": [(user_id, title, body, data), ...]}``: only images this app
+    uploaded for the user (``is_own_upload``), and the notifications to send after the commit.
     """
     now = datetime.now(timezone.utc)
     uid = user.id
     notify: list = []
+
+    # Lock the rows the blocker checks depend on, THEN check (READ COMMITTED sees whatever
+    # committed up to now): writers that lock these rows (withdrawals lock the user and the
+    # payments, payment settlement locks the booking) serialise with us, so nothing can slip
+    # in between this check and the commit.
+    db.query(Booking.id).filter(
+        (Booking.customer_id == uid) | (Booking.artisan_id == uid)
+    ).with_for_update().all()
+    db.query(Withdrawal.id).filter(Withdrawal.artisan_id == uid).with_for_update().all()
+    db.query(Payment.id).join(Booking, Booking.id == Payment.booking_id).filter(
+        (Booking.customer_id == uid) | (Booking.artisan_id == uid)
+    ).with_for_update(of=Payment).all()
+    blockers = find_blockers(db, user)
+    if blockers:
+        db.rollback()
+        raise DeletionBlocked(blockers)
 
     # Pending requests hold no money: close them so the other side is not left waiting.
     pending = (
@@ -140,9 +203,10 @@ def delete_account(db: Session, user: User) -> dict:
                 )
             )
 
-    image_urls = [u for (u,) in db.query(Portfolio.image_url).filter(Portfolio.artisan_id == uid)]
+    candidates = [u for (u,) in db.query(Portfolio.image_url).filter(Portfolio.artisan_id == uid)]
     if user.profile_picture_url:
-        image_urls.insert(0, user.profile_picture_url)
+        candidates.insert(0, user.profile_picture_url)
+    image_urls = [u for u in candidates if is_own_upload(u, uid)]
 
     # Personal / auxiliary rows that have no accounting value.
     for model, col in (

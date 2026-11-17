@@ -9,6 +9,7 @@ from decimal import Decimal
 import pytest
 
 from app.api.v1.endpoints import auth as auth_endpoints
+from app.core.config import settings
 from app.core.rate_limit import limiter
 from app.core.security import create_access_token, get_password_hash, verify_password
 from app.db.models.admin import AdminAuditLog
@@ -21,6 +22,7 @@ from app.db.models.push_device import PushDevice
 from app.db.models.user import User, UserType
 from app.db.models.user_notification import UserNotification
 from app.db.models.withdrawal import Withdrawal, WithdrawalStatus
+from app.services.account_deletion import DeletionBlocked, delete_account, is_own_upload
 from tests.admin.conftest import auth, make_booking, make_user
 from tests.factories import make_booking as fx_booking
 from tests.factories import make_payment as fx_payment
@@ -43,6 +45,19 @@ def no_rate_limit():
     limiter.enabled = False
     yield
     limiter.enabled = True
+
+
+@pytest.fixture(autouse=True)
+def cloudinary_settings(monkeypatch):
+    monkeypatch.setattr(settings, "CLOUDINARY_CLOUD_NAME", "democloud")
+    monkeypatch.setattr(settings, "CLOUDINARY_FOLDER", "workchop")
+
+
+def own_url(user_id, kind="profile_pictures", name="abc", ext="jpg"):
+    return (
+        f"https://res.cloudinary.com/democloud/image/upload/v1700000000/workchop/{kind}/"
+        f"{user_id}_{name}.{ext}"
+    )
 
 
 @pytest.fixture()
@@ -115,12 +130,13 @@ def test_delete_client_anonymises_but_keeps_financial_rows(
         email="ada@example.com",
         phone_number="+2348011112222",
         bio="hello",
-        profile_picture_url="https://res.cloudinary.com/x/me.jpg",
         location_address="12 Real Street",
         location_latitude=6.5,
         location_longitude=3.3,
         google_id="g-123",
     )
+    customer.profile_picture_url = own_url(customer.id)
+    db.commit()
     artisan = make_user(db, user_type=UserType.ARTISAN)
     done = make_booking(
         db, service, customer, artisan, status=BookingStatus.COMPLETED, disputed=False
@@ -166,7 +182,7 @@ def test_delete_client_anonymises_but_keeps_financial_rows(
     assert db.query(PushDevice).filter_by(user_id=customer.id).count() == 0
     assert db.query(UserNotification).filter_by(user_id=customer.id).count() == 0
     assert db.query(OTP).filter_by(user_id=customer.id).count() == 0
-    assert deleted_images == ["https://res.cloudinary.com/x/me.jpg"]
+    assert deleted_images == [own_url(customer.id)]
 
     # financial rows remain, linked to the anonymised user, with the PII scrubbed
     b = db.get(Booking, done.id)
@@ -218,30 +234,63 @@ def test_delete_is_not_repeatable(client, db):
 def test_artisan_is_anonymised_unlisted_and_portfolio_removed(
     client, db, deleted_images, blacklisted
 ):
-    artisan = user_with_pw(
-        db, user_type=UserType.ARTISAN, profile_picture_url="https://x.test/a.jpg"
-    )
+    artisan = user_with_pw(db, user_type=UserType.ARTISAN)
+    artisan.profile_picture_url = own_url(artisan.id)
     prof = db.query(ArtisanProfile).one()
     prof.specialization = "Plumbing"
     prof.location_address = "Real address"
     prof.nin_last4 = "1234"
     prof.verification_documents = '["https://x.test/doc.jpg"]'
-    db.add(Portfolio(artisan_id=artisan.id, image_url="https://x.test/p1.jpg", title="Job 1"))
-    db.add(Portfolio(artisan_id=artisan.id, image_url="https://x.test/p2.jpg"))
+    p1, p2 = own_url(artisan.id, "portfolio", "p1"), own_url(artisan.id, "portfolio", "p2")
+    db.add(Portfolio(artisan_id=artisan.id, image_url=p1, title="Job 1"))
+    db.add(Portfolio(artisan_id=artisan.id, image_url=p2))
     db.commit()
 
     assert delete(client, artisan, {"password": PW}).status_code == 200
     db.expire_all()
     assert db.query(Portfolio).count() == 0
-    assert sorted(deleted_images) == [
-        "https://x.test/a.jpg",
-        "https://x.test/p1.jpg",
-        "https://x.test/p2.jpg",
-    ]
+    assert sorted(deleted_images) == sorted([own_url(artisan.id), p1, p2])
     prof = db.query(ArtisanProfile).one()
     assert prof.location_address is None and prof.specialization is None
     assert prof.nin_last4 is None and prof.verification_documents is None
     assert prof.availability_status.value == "offline"
+
+
+def test_only_this_users_own_uploads_reach_the_storage_delete(client, db, deleted_images):
+    """A Google picture, a foreign URL, another user's file, traversal paths: never deleted."""
+    artisan = user_with_pw(db, user_type=UserType.ARTISAN)
+    other = make_user(db)
+    artisan.profile_picture_url = "https://lh3.googleusercontent.com/a/photo.jpg"  # Google picture
+    bad = [
+        own_url(other.id, "portfolio", "stolen"),  # another user's upload
+        "https://evil.example.com/workchop/portfolio/" + f"{artisan.id}_x.jpg",  # foreign host
+        "https://res.cloudinary.com/othercloud/image/upload/workchop/portfolio/"
+        + f"{artisan.id}_x.jpg",
+        f"https://res.cloudinary.com/democloud/image/upload/other_folder/{artisan.id}_x.jpg",
+        f"/static/portfolio/../../etc/{artisan.id}_x.jpg",  # traversal
+        f"/static/other/{artisan.id}_x.jpg",
+        "uploads/portfolio/" + f"{artisan.id}_x.jpg",
+        "",
+    ]
+    good = own_url(artisan.id, "portfolio", "mine")
+    local_good = f"/static/portfolio/{artisan.id}_local.jpg"
+    for url in bad + [good, local_good]:
+        db.add(Portfolio(artisan_id=artisan.id, image_url=url or "x"))
+    db.commit()
+    assert delete(client, artisan, {"password": PW}).status_code == 200
+    assert sorted(deleted_images) == sorted([good, local_good])  # everything else was skipped
+    db.expire_all()
+    assert db.query(Portfolio).count() == 0  # rows are removed either way
+
+
+def test_is_own_upload_rules():
+    uid = "11111111-1111-1111-1111-111111111111"
+    assert is_own_upload(own_url(uid), uid)
+    assert is_own_upload(own_url(uid, "portfolio", ext="png"), uid)
+    assert is_own_upload(f"/static/profile_pictures/{uid}_a.jpg", uid)
+    assert not is_own_upload(own_url(uid, "progress_logs"), uid)  # not a user-owned folder
+    assert not is_own_upload(own_url("22222222-2222-2222-2222-222222222222"), uid)
+    assert not is_own_upload(None, uid)
 
 
 # ----------------------------------------------------------------------- blockers
@@ -266,6 +315,39 @@ def test_active_bookings_block_deletion_for_both_sides(client, db, service, stat
         assert blockers(r)["active_bookings"]["count"] == 1
     db.expire_all()
     assert db.get(User, customer.id).is_active and db.get(User, artisan.id).is_active
+
+
+def test_delete_account_rechecks_blockers_under_locks_and_changes_nothing(db, service):
+    """Even if a caller skipped the pre-check (or a booking was accepted a moment ago), the
+    service itself refuses and leaves the account untouched."""
+    customer, artisan = user_with_pw(db), make_user(db, user_type=UserType.ARTISAN)
+    make_booking(
+        db,
+        service,
+        customer,
+        artisan,
+        status=BookingStatus.ACCEPTED,
+        payment_status=None,
+        disputed=False,
+    )
+    pend = make_booking(
+        db,
+        service,
+        customer,
+        artisan,
+        status=BookingStatus.PENDING,
+        payment_status=None,
+        disputed=False,
+    )
+    user = db.query(User).filter(User.id == customer.id).with_for_update().one()
+    with pytest.raises(DeletionBlocked) as exc:
+        delete_account(db, user)
+    assert exc.value.blockers[0]["code"] == "active_bookings"
+    db.expire_all()
+    u = db.get(User, customer.id)
+    assert u.is_active and u.deleted_at is None and u.email != "" and u.hashed_password
+    assert db.get(Booking, pend.id).status == BookingStatus.PENDING  # pending not closed either
+    assert db.query(AdminAuditLog).count() == 0
 
 
 def test_unfinished_withdrawal_blocks(client, db, service):

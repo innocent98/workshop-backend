@@ -65,7 +65,7 @@ from app.schemas.auth import (
     VerifyOTPRequest,
     VerifyOTPResponse,
 )
-from app.services.account_deletion import delete_account, find_blockers
+from app.services.account_deletion import DeletionBlocked, delete_account
 from app.services.auth import AuthService
 from app.services.notify import notify_user
 from app.utils.file_upload import delete_image
@@ -556,21 +556,20 @@ def delete_my_account(
 
     # Lock the user row so a concurrent request cannot race the checks below.
     user = db.query(User).filter(User.id == current_user.id).with_for_update().one()
-    blockers = find_blockers(db, user)
-    if blockers:
-        db.rollback()
+    # Revoke the presented token explicitly; every other token dies because the account is inactive.
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header.split(" ")[1] if auth_header.startswith("Bearer ") else None
+
+    try:
+        result = delete_account(db, user)
+    except DeletionBlocked as exc:
+        blockers = exc.blockers
         raise _deletion_error(
             blockers[0]["code"],
             "Your account cannot be deleted yet: " + " ".join(b["message"] for b in blockers),
             status.HTTP_409_CONFLICT,
             blockers=blockers,
         )
-
-    # Revoke the presented token explicitly; every other token dies because the account is inactive.
-    auth_header = request.headers.get("Authorization", "")
-    token = auth_header.split(" ")[1] if auth_header.startswith("Bearer ") else None
-
-    result = delete_account(db, user)
     if token:
         blacklist_token(token)
     for image_url in result["image_urls"]:
