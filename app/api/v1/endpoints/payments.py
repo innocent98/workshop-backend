@@ -300,7 +300,7 @@ def verify_payment(
     paystack_status = verification_response.get('status')
     if paystack_status == 'success':
         # Same settlement function as the webhook: idempotent, amount/currency checked.
-        result = apply_charge_success(db, payment.payment_reference, verification_response)
+        result = apply_charge_success(db, reference, verification_response)
         db.refresh(payment)
         if result.outcome == OUTCOME_MISMATCH:
             return {
@@ -319,7 +319,7 @@ def verify_payment(
         }
 
     if paystack_status == 'failed':
-        apply_charge_failed(db, payment.payment_reference, verification_response)
+        apply_charge_failed(db, reference, verification_response)
         db.refresh(payment)
         return {
             "payment_reference": payment.payment_reference,

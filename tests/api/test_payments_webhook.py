@@ -227,3 +227,30 @@ def test_reinitialised_payment_still_accepts_a_late_charge_on_the_old_reference(
     assert late.json() == {"status": "success", "message": "Payment processed"}
     db.expire_all()
     assert db.get(type(booking), booking.id).status == BookingStatus.PAID
+
+
+def test_verify_of_an_old_reference_reporting_failed_does_not_fail_the_current_attempt(
+    client, db, pending_payment, monkeypatch
+):
+    from app.api.deps import get_current_user
+    from app.db.models.user import User
+    from app.main import app
+    from app.services.payment_service import archive_payment_reference
+
+    booking, payment = pending_payment
+    old_ref, customer_id = payment.payment_reference, booking.customer_id
+    archive_payment_reference(db, payment)
+    payment.payment_reference = payment.paystack_reference = "PAY-CURRENT-REF"
+    db.commit()
+
+    monkeypatch.setattr(
+        PaystackService, "verify_transaction", staticmethod(lambda ref: {"status": "failed"})
+    )
+    app.dependency_overrides[get_current_user] = lambda: db.get(User, customer_id)
+    try:
+        r = client.get(f"/api/v1/payments/verify/{old_ref}")
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+    assert r.status_code == 200
+    db.expire_all()
+    assert db.get(type(payment), payment.id).status == PaymentStatus.PENDING
