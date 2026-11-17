@@ -256,6 +256,7 @@ def test_refund_failed_event_reopens_the_dispute_for_retry_or_release(
     resolve(client, admin_h, disputed.id)
     ref = db.query(Payment).one().paystack_reference
 
+    ps.lists = [[{"id": 4242, "status": "failed"}]]
     assert handle_refund_event(db, "refund.failed", {"transaction": {"reference": ref}}) == "failed"
     assert states(db, disputed.id) == (BookingStatus.DISPUTED, PaymentStatus.SUCCESS, "failed")
     db.expire_all()
@@ -272,6 +273,7 @@ def test_release_allowed_after_a_confirmed_failed_refund(client, db, admin_h, di
     ps.refunds = [{"id": 4242, "status": "pending"}]
     resolve(client, admin_h, disputed.id)
     ref = db.query(Payment).one().paystack_reference
+    ps.lists = [[{"id": 4242, "status": "failed"}]]
     handle_refund_event(db, "refund.failed", {"transaction_reference": ref})
     r = resolve(client, admin_h, disputed.id, "release_to_artisan", note="Refund failed; releasing")
     assert r.status_code == 200 and r.json()["resolution"] == "release_to_artisan"
@@ -280,6 +282,49 @@ def test_release_allowed_after_a_confirmed_failed_refund(client, db, admin_h, di
     b = db.get(Booking, disputed.id)
     assert b.status == BookingStatus.COMPLETED and b.completion_disputed_at is None
     assert db.query(DisputeResolution).count() == 1
+
+
+def test_stale_failed_event_for_an_earlier_refund_cannot_reopen_a_live_retry(
+    client, db, admin_h, disputed, ps
+):
+    """refund #1 failed, the admin retried (refund #2 live), then #1's failed event arrives late."""
+    ps.refunds = [{"id": 1, "status": "pending"}, {"id": 2, "status": "pending"}]
+    resolve(client, admin_h, disputed.id)
+    ref = db.query(Payment).one().paystack_reference
+    ps.lists = [[{"id": 1, "status": "failed"}]]
+    assert (
+        handle_refund_event(db, "refund.failed", {"transaction_reference": ref, "id": 1})
+        == "failed"
+    )
+    resolve(client, admin_h, disputed.id)  # retry -> refund #2
+    assert states(db, disputed.id) == (BookingStatus.CANCELLED, PaymentStatus.REFUNDED, "pending")
+
+    ps.lists = []  # would say "nothing live" if it were consulted: it must not even be reached
+    out = handle_refund_event(db, "refund.failed", {"transaction_reference": ref, "id": 1})
+    assert out == "pending"
+    assert states(db, disputed.id) == (BookingStatus.CANCELLED, PaymentStatus.REFUNDED, "pending")
+    assert resolve(client, admin_h, disputed.id, "release_to_artisan").status_code == 409
+
+
+def test_failed_event_is_ignored_when_paystack_lists_a_live_refund(
+    client, db, admin_h, disputed, ps
+):
+    ps.refunds = [{"id": 4242, "status": "pending"}]
+    resolve(client, admin_h, disputed.id)
+    ref = db.query(Payment).one().paystack_reference
+    ps.lists = [[{"id": 4242, "status": "processing"}]]  # event lies / is stale
+    out = handle_refund_event(db, "refund.failed", {"transaction_reference": ref})
+    assert out == "pending"
+    assert states(db, disputed.id) == (BookingStatus.CANCELLED, PaymentStatus.REFUNDED, "pending")
+
+
+def test_failed_event_not_applied_when_paystack_cannot_confirm(client, db, admin_h, disputed, ps):
+    ps.refunds = [{"id": 4242, "status": "pending"}]
+    resolve(client, admin_h, disputed.id)
+    ref = db.query(Payment).one().paystack_reference
+    ps.lists = [PaystackError("down")]
+    assert handle_refund_event(db, "refund.failed", {"transaction_reference": ref}) == "pending"
+    assert states(db, disputed.id) == (BookingStatus.CANCELLED, PaymentStatus.REFUNDED, "pending")
 
 
 def test_refund_event_for_unknown_transaction_is_ignored(db):
@@ -399,6 +444,7 @@ def test_refund_failed_webhook_reopens_the_dispute(
     resolve(client, admin_h, disputed.id)
     ref = db.query(Payment).one().paystack_reference
 
+    ps.lists = [[{"id": 4242, "status": "failed"}]]
     r = _post_event(client, "refund.failed", {"transaction_reference": ref})
     assert r.status_code == 200 and r.json()["message"] == "Refund failed"
     assert states(db, disputed.id) == (BookingStatus.DISPUTED, PaymentStatus.SUCCESS, "failed")

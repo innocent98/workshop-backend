@@ -39,7 +39,7 @@ reconciles first). Paystack refunds are asynchronous, so `handle_refund_event` a
 processed|failed` (never moves backwards; `processed` is final; `failed` puts payment back to `success` and the
 booking back to `disputed` so the admin can retry or release). The events are wired into the Paystack
 webhook in `payments.py` (`REFUND_WEBHOOK_EVENTS` in `_handle_webhook_event`, signature-checked like every event; an
-unknown transaction is acknowledged as `ignored`). Residual risk:
+unknown transaction is acknowledged as `ignored`). A `refund.failed` event is never trusted on its own (it would reopen the dispute and unblock a release): it is ignored when it names a different refund than the one we hold (a late event for an earlier, already-retried refund), and otherwise applied only if Paystack's refund list shows no live refund; if that lookup fails nothing changes. Residual risk:
 two admins retrying simultaneously can both call Paystack; Paystack rejects the second ("already reversed") and
 reconciliation adopts the first.
 

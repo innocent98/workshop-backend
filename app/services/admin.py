@@ -380,13 +380,13 @@ def handle_refund_event(db: Session, event: str, data: dict) -> Optional[str]:
     """
     Apply a Paystack ``refund.*`` webhook event (pending / processing / processed / failed) to the
     matching dispute resolution. Returns the resulting refund_status, or None if the event is not
-    one of ours. The webhook route (payments.py) must verify the Paystack signature and then call
-    this; that wiring is intentionally left to the payments rebase.
+    one of ours. Called from the Paystack webhook (payments.py), which verifies the signature first.
 
     * Never moves a refund backwards (a late ``pending`` after ``processed`` is ignored) and a
       ``processed`` refund is final.
     * ``failed`` means the money did not go back: payment -> success, booking -> disputed again, so
-      the admin can retry the refund or release instead.
+      the admin can retry the refund or release instead. It is only applied after Paystack's refund
+      list confirms no live refund exists (``_failed_event_is_confirmed``).
 
     Event payload keys are taken from Paystack's refund object (``transaction_reference`` or
     ``transaction.reference``, ``id``, ``status``); NOT VERIFIED against a live webhook.
@@ -402,7 +402,6 @@ def handle_refund_event(db: Session, event: str, data: dict) -> Optional[str]:
     payment = db.query(Payment).filter(Payment.paystack_reference == str(tx)).first()
     if payment is None:
         return None
-    booking = db.query(Booking).filter(Booking.id == payment.booking_id).with_for_update().first()
     record = (
         db.query(DisputeResolution)
         .filter(
@@ -412,9 +411,16 @@ def handle_refund_event(db: Session, event: str, data: dict) -> Optional[str]:
         .first()
     )
     if record is None:
-        db.rollback()
         return None
 
+    if record.refund_status == "processed":
+        return record.refund_status  # final: nothing can move it
+    if new == "failed" and not _failed_event_is_confirmed(record, data, str(tx)):
+        db.rollback()
+        return record.refund_status
+
+    booking = db.query(Booking).filter(Booking.id == payment.booking_id).with_for_update().first()
+    db.refresh(record)
     current = record.refund_status
     if current == "processed" or (current == "failed" and new != "failed"):
         db.rollback()
@@ -443,6 +449,33 @@ def handle_refund_event(db: Session, event: str, data: dict) -> Optional[str]:
     result = record.refund_status
     db.commit()
     return result
+
+
+def _failed_event_is_confirmed(record: DisputeResolution, data: dict, tx: str) -> bool:
+    """
+    A ``refund.failed`` event reopens the dispute (the artisan could then be released), so it is
+    never trusted on its own. A late event for an EARLIER failed refund must not undo a retry that
+    is live, so: ignore it when it names a different refund than the one we hold, and otherwise
+    ask Paystack: only reopen if Paystack lists no non-failed refund for the transaction. If the
+    lookup itself fails, do nothing (the refund row stays, so release stays blocked).
+    """
+    event_id = data.get("id")
+    if (
+        record.refund_reference
+        and event_id is not None
+        and str(event_id) != record.refund_reference
+    ):
+        logger.info(f"Ignoring refund.failed for superseded refund {event_id}")
+        return False
+    try:
+        live = _find_refund(PaystackService.list_refunds(tx))
+    except PaystackError:
+        logger.warning("refund.failed not applied: could not confirm with Paystack")
+        return False
+    if live is not None:
+        logger.info("Ignoring refund.failed: Paystack lists a live refund for the transaction")
+        return False
+    return True
 
 
 def _artisan_profile(db: Session, user_id: UUID) -> ArtisanProfile:
