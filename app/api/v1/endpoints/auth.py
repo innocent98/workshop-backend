@@ -476,12 +476,7 @@ def change_password(
     Wrong current passwords are counted per USER (5 per 15 minutes, then 429 ``too_many_attempts``)
     so a stolen token cannot be used to guess the password here.
     """
-    if attempt_limit.is_locked(CHANGE_PASSWORD_SCOPE, str(current_user.id)):
-        raise _deletion_error(
-            "too_many_attempts",
-            "Too many incorrect attempts. Please try again in a few minutes.",
-            status.HTTP_429_TOO_MANY_REQUESTS,
-        )
+    _begin_credential_attempt(CHANGE_PASSWORD_SCOPE, current_user)
     try:
         AuthService.change_password(
             db=db,
@@ -490,8 +485,11 @@ def change_password(
             new_password=body.new_password,
         )
     except HTTPException as exc:
-        if exc.detail == "Current password is incorrect":
-            attempt_limit.register_failure(CHANGE_PASSWORD_SCOPE, str(current_user.id))
+        if exc.detail != "Current password is incorrect":
+            attempt_limit.release_attempt(CHANGE_PASSWORD_SCOPE, str(current_user.id))
+        raise
+    except Exception:
+        attempt_limit.release_attempt(CHANGE_PASSWORD_SCOPE, str(current_user.id))
         raise
     attempt_limit.clear(CHANGE_PASSWORD_SCOPE, str(current_user.id))
 
@@ -514,23 +512,46 @@ def _deletion_error(code: str, message: str, http_status: int, **extra) -> HTTPE
     )
 
 
-def _reauthenticate_for_deletion(user: User, body: DeleteAccountRequest) -> None:
-    """Re-authenticate; wrong credentials are also counted per USER (5 per 15 min)."""
-    if attempt_limit.is_locked(DELETE_SCOPE, str(user.id)):
+def _begin_credential_attempt(scope: str, user: User) -> None:
+    """
+    Count one credential attempt for ``user`` BEFORE checking it (atomic, so concurrent guesses
+    cannot all pass a read-then-write check). 429 when the budget is used up. Fails CLOSED when
+    Redis is down: 503 ``limiter_unavailable``, never an unlimited guessing window. (Sign-in has
+    its own per-IP limiter and stays fail-open.)
+    """
+    try:
+        allowed = attempt_limit.begin_attempt(scope, str(user.id), fail_closed=True)
+    except attempt_limit.LimiterUnavailable:
+        raise _deletion_error(
+            "limiter_unavailable",
+            "This action is temporarily unavailable. Please try again in a few minutes.",
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    if not allowed:
         raise _deletion_error(
             "too_many_attempts",
             "Too many incorrect attempts. Please try again in a few minutes.",
             status.HTTP_429_TOO_MANY_REQUESTS,
         )
+
+
+def _reauthenticate_for_deletion(user: User, body: DeleteAccountRequest) -> None:
+    """Re-authenticate; wrong credentials are also counted per USER (5 per 15 min)."""
+    _begin_credential_attempt(DELETE_SCOPE, user)
     try:
         _check_deletion_credentials(user, body)
     except HTTPException as exc:
-        if isinstance(exc.detail, dict) and exc.detail.get("code") in (
-            "invalid_password",
-            "invalid_reauth",
+        if not (
+            isinstance(exc.detail, dict)
+            and exc.detail.get("code") in ("invalid_password", "invalid_reauth")
         ):
-            attempt_limit.register_failure(DELETE_SCOPE, str(user.id))
+            attempt_limit.release_attempt(DELETE_SCOPE, str(user.id))  # not a bad credential
         raise
+    except Exception:
+        attempt_limit.release_attempt(DELETE_SCOPE, str(user.id))
+        raise
+    # Correct credential: not a failure (a later 409 blocker must not eat into the budget).
+    attempt_limit.release_attempt(DELETE_SCOPE, str(user.id))
 
 
 def _check_deletion_credentials(user: User, body: DeleteAccountRequest) -> None:

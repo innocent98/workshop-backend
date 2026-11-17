@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from app.core.logger import logger
 from app.db.models.booking import Booking, BookingStatus
 from app.db.models.payment import Payment, PaymentMethod, PaymentReference, PaymentStatus
+from app.db.models.user import User
 from app.services.notify import notify_user
 
 # Paystack channel -> our PaymentMethod. Anything unknown falls back to OTHER.
@@ -67,7 +68,10 @@ def find_payment_by_reference(db: Session, reference: str, lock: bool = False) -
 
     def _query(*criteria):
         q = db.query(Payment).filter(*criteria)
-        return q.with_for_update() if lock else q
+        # FOR UPDATE alone does not refresh an instance the session already holds (an earlier
+        # unlocked read, e.g. /payments/verify or the probe in apply_charge_success): without
+        # populate_existing the status checks after the lock would use stale data.
+        return q.with_for_update().populate_existing() if lock else q
 
     payment = _query(Payment.payment_reference == reference).first()
     if payment is None:
@@ -110,11 +114,24 @@ def apply_charge_success(db: Session, reference: str, data: dict) -> ChargeResul
     - Payment becomes SUCCESS (from PENDING / PROCESSING / FAILED).
     - Booking moves ACCEPTED -> PAID only; it is never moved backwards.
     """
-    payment = _lock_payment(db, reference)
-    if payment is None:
+    # Lock order is BOOKING then PAYMENT, the same as account deletion (which locks every booking
+    # of the user and then their payments); the reverse order can deadlock with it. The unlocked
+    # read only finds the booking id (a payment never changes booking); the payment row is then
+    # locked and read afresh below.
+    probe = find_payment_by_reference(db, reference)
+    if probe is None:
         return ChargeResult(OUTCOME_NOT_FOUND)
-
-    booking = db.query(Booking).filter(Booking.id == payment.booking_id).with_for_update().first()
+    booking = (
+        db.query(Booking)
+        .filter(Booking.id == probe.booking_id)
+        .with_for_update()
+        .populate_existing()  # the session may hold a stale copy (see find_payment_by_reference)
+        .first()
+    )
+    payment = _lock_payment(db, reference)
+    if payment is None:  # pragma: no cover - payments are never deleted
+        db.rollback()
+        return ChargeResult(OUTCOME_NOT_FOUND)
 
     if payment.status in (PaymentStatus.SUCCESS, PaymentStatus.RELEASED, PaymentStatus.REFUNDED):
         settled_ref = payment.paystack_reference
@@ -148,8 +165,25 @@ def apply_charge_success(db: Session, reference: str, data: dict) -> ChargeResul
     payment.paystack_response = json.dumps(data)
     payment.paystack_reference = data.get("reference") or payment.paystack_reference
 
+    # Read AFTER the booking lock: an account deletion in flight holds that lock, so this sees its
+    # committed result. Money for a deleted customer is not kept silently: an admin refunds it.
+    customer = (
+        db.query(User.is_active, User.deleted_at).filter(User.id == booking.customer_id).first()
+        if booking is not None
+        else None
+    )
+    customer_gone = customer is not None and (
+        not customer.is_active or customer.deleted_at is not None
+    )
+
     booking_moved = False
-    if booking is not None and booking.status == BookingStatus.ACCEPTED:
+    if customer_gone:
+        logger.error(
+            f"Payment {payment.id} succeeded for booking {booking.id} whose customer account "
+            f"is deleted/inactive; booking left unchanged, flagged needs_refund"
+        )
+        payment.needs_refund = True
+    elif booking is not None and booking.status == BookingStatus.ACCEPTED:
         booking.status = BookingStatus.PAID
         booking.paid_at = now
         booking_moved = True

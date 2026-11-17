@@ -228,6 +228,24 @@ async def create_booking(
             status_code=status.HTTP_403_FORBIDDEN, detail="Only customers can create bookings"
         )
 
+    # The customer must still be active, read under a lock: a customer whose deletion is in flight
+    # holds this row FOR UPDATE, so we wait for it and then see the committed (inactive) state
+    # instead of inserting a PENDING booking after the account was anonymised.
+    customer_active = (
+        db.query(User.is_active)
+        .filter(User.id == current_user.id)
+        .with_for_update(read=True)
+        .scalar()
+    )
+    if not customer_active:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "account_unavailable",
+                "message": "Your account is no longer available.",
+            },
+        )
+
     # Verify artisan exists and is active. FOR SHARE: account deletion takes FOR UPDATE on the user
     # row, so a booking can no longer be inserted for an artisan whose deletion is in flight (the
     # deletion would otherwise miss it), and a committed deletion is seen as inactive.
