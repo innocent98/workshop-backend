@@ -46,6 +46,7 @@ user. The same email/phone can be registered again.
 | 403 | `reauth_required` | Google token older than 5 minutes: re-run Google sign-in, retry |
 | 403 | `invalid_reauth` | Google token invalid or for a different Google account |
 | 429 | `too_many_attempts` | 5 wrong credentials in 15 min for this user: show "try again in a few minutes" |
+| 503 | `limiter_unavailable` | the attempt limiter is down (Redis outage): nothing was changed, show "temporarily unavailable, try again in a few minutes". **NOT VERIFIED LIVE** (shape from tests) |
 | 409 | `admin_account` | admin accounts cannot be deleted from the app |
 | 409 | `active_bookings` / `unfinished_withdrawal` / `wallet_balance` / `refund_pending` | **blocked**, see below |
 | 401/403 | (string) | not authenticated / revoked token: standard handling |
@@ -73,12 +74,22 @@ deactivated**: `PATCH /bookings/{id}/negotiate`, `/negotiate/respond`, `/accept`
 trapped. In the UI: show "This user's account is no longer available" and offer to cancel the booking. A booking
 request created for an artisan whose deletion is in flight returns the usual 404 `Artisan not found or inactive`.
 
+`POST /bookings` also returns `409 {"detail": {"code": "account_unavailable", "message": "Your account is no longer available."}}`
+when the **customer's own** account was deleted while the request was in flight (the request raced a deletion on
+another device). Treat it like a revoked session: sign the user out. **NOT VERIFIED LIVE** (shape from
+`tests/api/test_booking_account_races.py`; in practice the token is usually already rejected with 403 first).
+
 ## 3c. `POST /auth/change-password` now has an attempt limit
 
 Wrong *current* passwords are counted per user: after 5 in 15 minutes the endpoint answers
 `429 {"detail": {"code": "too_many_attempts", "message": "..."}}`, even for the correct password, until the
 window passes (the wrong-password answer itself is unchanged: `400 {"detail": "Current password is incorrect"}`).
 Show "too many attempts, try again in a few minutes". It does not share a counter with account deletion.
+
+If the limiter's Redis is down, `POST /auth/change-password` (and `DELETE /auth/me`) answer
+`503 {"detail": {"code": "limiter_unavailable", "message": "This action is temporarily unavailable. Please try again in a few minutes."}}`
+and change nothing, instead of allowing unlimited guesses. Show a retry-later message. Sign-in is not affected.
+**NOT VERIFIED LIVE** (shape from `tests/api/test_account_deletion.py`; a Redis outage was not staged against the running app).
 
 ## 4. UX instructions
 
@@ -647,5 +658,6 @@ direct DB read after the delete (not an API response)
 | `unfinished_withdrawal` blocker, `wallet_balance` for money still in the confirmation window, rejected pending booking for a deleted artisan, portfolio image removal from Cloudinary, every other token of the account dying | tests only |
 | Other tokens of the same account (other devices) stop working | tests only (they are rejected because the account is inactive) |
 | `refund_pending` blocker for a dispute refund that is pending at Paystack (captured), change-password 400 then 429 `too_many_attempts` (captured) | **verified live** |
+| 503 `limiter_unavailable` on delete and change-password with Redis down, 409 `account_unavailable` on `POST /bookings` for a customer deleted mid-request | tests only, **NOT VERIFIED LIVE** |
 | `refund_pending` for a payment flagged `needs_refund`, both parties for every in-flight refund state, delete-side 429 `too_many_attempts`, 409 `account_unavailable` on booking actions and payment initialisation, booking row locking under a concurrent deletion | tests only (the lock tests use a second database session and threads) |
 | Raw Paystack/payout JSON scrubbed on deletion | tests only |

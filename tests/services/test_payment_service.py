@@ -1,8 +1,10 @@
 from decimal import Decimal
 
+import pytest
+
 from app.db.models.booking import BookingStatus
 from app.db.models.payment import PaymentMethod, PaymentStatus
-from app.db.models.user import UserType
+from app.db.models.user import User, UserType
 from app.services import payment_service as svc
 from tests.factories import make_booking, make_payment, make_service, make_user
 
@@ -215,3 +217,75 @@ def test_redelivery_of_the_same_reference_is_not_a_duplicate(db):
     svc.apply_charge_success(db, ref, _charge(payment))
     db.refresh(payment)
     assert payment.needs_refund is False
+
+
+def test_late_charge_for_a_deleted_customer_is_flagged_needs_refund(db, notifications):
+    """The money is recorded, the booking is left alone, and an admin is told to refund it."""
+    artisan, booking, payment = _setup(db)
+    customer = db.get(User, booking.customer_id)
+    customer.is_active = False  # anonymised by account deletion
+    db.commit()
+
+    result = svc.apply_charge_success(db, payment.payment_reference, _charge(payment))
+
+    assert result.outcome == svc.OUTCOME_PROCESSED
+    db.refresh(payment), db.refresh(booking)
+    assert payment.status == PaymentStatus.SUCCESS
+    assert payment.needs_refund is True
+    assert booking.status == BookingStatus.ACCEPTED  # not moved to PAID for a deleted customer
+    assert notifications == []  # the artisan is not told to start a job nobody can pay for
+
+
+def test_charge_success_locks_the_booking_before_the_payment(db):
+    """Account deletion locks bookings then payments; settlement must use the same order or the
+    two deadlock. While another transaction holds the booking, settlement may wait but must not
+    already be holding the payment row."""
+    import threading
+    import time
+
+    from sqlalchemy import text
+    from sqlalchemy.exc import OperationalError
+
+    from tests.conftest import TestingSessionLocal
+
+    _, booking, payment = _setup(db)
+    ref, booking_id, payment_id, data = (
+        payment.payment_reference,
+        booking.id,
+        payment.id,
+        _charge(payment),
+    )
+    db.rollback()
+
+    holder = TestingSessionLocal()  # the "deletion": holds the booking row
+    holder.execute(text("SELECT id FROM bookings WHERE id = :i FOR UPDATE"), {"i": booking_id})
+
+    outcome = {}
+
+    def settle():
+        session = TestingSessionLocal()
+        try:
+            outcome["result"] = svc.apply_charge_success(session, ref, data).outcome
+        finally:
+            session.close()
+
+    worker = threading.Thread(target=settle)
+    worker.start()
+    probe = TestingSessionLocal()
+    try:
+        time.sleep(1.0)
+        assert worker.is_alive(), "settlement did not wait for the booking lock"
+        try:
+            probe.execute(
+                text("SELECT id FROM payments WHERE id = :i FOR UPDATE NOWAIT"), {"i": payment_id}
+            )
+        except OperationalError:  # pragma: no cover
+            pytest.fail("settlement locked the payment before the booking (deadlock order)")
+        probe.rollback()
+        holder.commit()
+        worker.join(timeout=15)
+    finally:
+        probe.close()
+        holder.close()
+    assert not worker.is_alive()
+    assert outcome["result"] == svc.OUTCOME_PROCESSED

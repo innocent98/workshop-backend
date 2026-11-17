@@ -905,6 +905,58 @@ def test_change_password_success_clears_the_counter(client, db):
     assert attempt_limit.failures("change_password", str(u.id)) == 0
 
 
+# ------------------------------------------- Redis outage: delete / change-password fail CLOSED
+
+
+class _BrokenRedis:
+    def __getattr__(self, name):
+        def boom(*args, **kwargs):
+            raise ConnectionError("redis is down")
+
+        return boom
+
+
+@pytest.fixture()
+def redis_down(monkeypatch):
+    from app.core import attempt_limit
+
+    monkeypatch.setattr(attempt_limit, "redis_client", _BrokenRedis())
+
+
+def test_delete_fails_closed_with_503_when_the_limiter_is_down(client, db, redis_down):
+    u = user_with_pw(db)
+    r = delete(client, u, {"password": PW})  # even the correct password: no unlimited guessing
+    assert r.status_code == 503 and r.json()["detail"]["code"] == "limiter_unavailable"
+    db.expire_all()
+    assert db.get(User, u.id).is_active is True
+
+
+def test_change_password_fails_closed_with_503_when_the_limiter_is_down(client, db, redis_down):
+    u = user_with_pw(db)
+    r = change(client, u, PW)
+    assert r.status_code == 503 and r.json()["detail"]["code"] == "limiter_unavailable"
+    db.expire_all()
+    assert verify_password(PW, db.get(User, u.id).hashed_password)  # unchanged
+
+
+def test_login_is_unaffected_by_a_limiter_outage(client, db, redis_down):
+    user_with_pw(db, email="outage@example.com")
+    r = client.post("/api/v1/auth/login", json={"email": "outage@example.com", "password": PW})
+    assert r.status_code == 200, r.text
+
+
+def test_a_blocked_delete_does_not_use_up_the_attempt_budget(client, db, service):
+    """A correct password followed by a 409 blocker is not a failure: it is given back."""
+    from app.core import attempt_limit
+
+    customer, artisan = user_with_pw(db), make_user(db, user_type=UserType.ARTISAN)
+    make_booking(db, service, customer, artisan, status=BookingStatus.ACCEPTED, disputed=False)
+    for _ in range(7):
+        r = delete(client, customer, {"password": PW})
+        assert r.status_code == 409 and r.json()["detail"]["code"] == "active_bookings"
+    assert attempt_limit.failures("account_delete", str(customer.id)) == 0
+
+
 def test_change_password_and_delete_counters_are_independent(client, db):
     u = user_with_pw(db)
     for _ in range(5):

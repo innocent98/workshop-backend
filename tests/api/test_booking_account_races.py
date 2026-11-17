@@ -174,6 +174,78 @@ def test_create_booking_waits_for_a_deleting_artisan_then_404s(db, service):
     assert db.query(Booking).count() == 0
 
 
+def _booking_body(artisan_id, service_id):
+    return {
+        "artisan_id": str(artisan_id),
+        "service_id": service_id,
+        "job_description": "Fix sink",
+        "job_date": (datetime.now(timezone.utc) + timedelta(days=2)).isoformat(),
+        "job_latitude": 6.5,
+        "job_longitude": 3.3,
+        "job_address": "12 Example Street",
+        "budget_min": 5000,
+        "budget_max": 10000,
+    }
+
+
+def test_create_booking_waits_for_a_deleting_customer_then_409s(db, service):
+    """A customer mid-deletion holds their own user row; the booking must not be inserted after the
+    account was anonymised (the deletion would never see it)."""
+    customer = make_user(db, user_type=UserType.CLIENT)
+    artisan = make_user(db, user_type=UserType.ARTISAN)
+    db.add(UserService(user_id=artisan.id, service_id=service.id))
+    db.commit()
+    customer_id, body = customer.id, _booking_body(artisan.id, service.id)
+
+    holder = TestingSessionLocal()
+    holder.query(User).filter(User.id == customer_id).with_for_update().one()  # deletion in flight
+
+    def thread_session():
+        s = TestingSessionLocal()
+        try:
+            yield s
+        finally:
+            s.close()
+
+    app.dependency_overrides[get_db] = thread_session
+    from fastapi.testclient import TestClient
+
+    result = {}
+
+    def call():
+        with TestClient(app) as c:
+            result["resp"] = c.post(BASE, headers=auth(customer), json=body)
+
+    t = threading.Thread(target=call)
+    t.start()
+    try:
+        time.sleep(1.0)
+        assert t.is_alive(), "booking creation did not wait for the customer row lock"
+        u = holder.query(User).filter(User.id == customer_id).one()
+        u.is_active = False  # the deletion commits
+        holder.commit()
+        t.join(timeout=15)
+    finally:
+        holder.close()
+        app.dependency_overrides.pop(get_db, None)
+    assert not t.is_alive()
+    assert result["resp"].status_code == 409, result["resp"].text
+    assert result["resp"].json()["detail"]["code"] == "account_unavailable"
+    db.expire_all()
+    assert db.query(Booking).count() == 0
+
+
+def test_an_active_customer_can_still_create_a_booking(client, db, service):
+    customer = make_user(db, user_type=UserType.CLIENT)
+    artisan = make_user(db, user_type=UserType.ARTISAN)
+    db.add(UserService(user_id=artisan.id, service_id=service.id))
+    db.commit()
+    headers = auth(customer)
+    ok = client.post(BASE, headers=headers, json=_booking_body(artisan.id, service.id))
+    assert ok.status_code == 201, ok.text
+    assert db.query(Booking).count() == 1
+
+
 # ----------------------------------------------------- inactive / deleted counterparty
 
 
