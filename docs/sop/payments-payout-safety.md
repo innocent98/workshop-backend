@@ -29,7 +29,9 @@ A code audit found real defects in the money paths:
    and compare Paystack's `amount` (kobo, int) and `currency` to the stored payment; a mismatch is **not**
    settled (logged at ERROR; webhook still answers 200 so Paystack stops retrying). Only `ACCEPTED → PAID`; the
    booking is never moved backwards. A late `charge.success` after a `FAILED` payment still settles (Paystack is
-   the truth). `verify` only marks `FAILED` when Paystack says `failed`; `abandoned`/`pending` leave it `PENDING`.
+   the truth). `verify` only marks `FAILED` on a terminal Paystack status (`failed`, `reversed`); `abandoned`/`pending`/`ongoing`/
+   `queued`/`processing`/unknown leave it `PENDING` (answer: "Payment not completed yet"), so a premature verify poll
+   cannot poison the status (follow-up PR `fix/payments-verify-terminal-only`: `reversed` + tests).
 2. **Channel mapping** (`map_paystack_channel`): every known Paystack channel maps to a `PaymentMethod`; anything
    unknown maps to `OTHER`. `payments.payment_method` is `VARCHAR(20)` in the real schema (see
    `d7f8e9a1b2c3`), so adding enum members needs **no migration** (no `ALTER TYPE`).
