@@ -1,16 +1,16 @@
 from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
-    health,
     auth,
-    services,
-    profiles,
-    search,
     bookings,
-    payments,
-    reviews,
-    wallet,
+    health,
     notifications,
+    payments,
+    profiles,
+    reviews,
+    search,
+    services,
+    wallet,
 )
 
 api_router = APIRouter()

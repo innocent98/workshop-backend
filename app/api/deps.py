@@ -1,20 +1,18 @@
-from typing import Generator
 from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from jose import jwt, JWTError
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.db.session import get_db
-from app.db.models.user import User
 from app.core.token_blacklist import is_token_blacklisted
+from app.db.models.user import User
+from app.db.session import get_db
 
 security = HTTPBearer()
 
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_db)
+    credentials: HTTPAuthorizationCredentials = Depends(security), db: Session = Depends(get_db)
 ):
     token = credentials.credentials
     credentials_exception = HTTPException(
@@ -32,9 +30,7 @@ async def get_current_user(
         )
 
     try:
-        payload = jwt.decode(
-            token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
-        )
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         user_id: str = payload.get("sub")
         if user_id is None:
             raise credentials_exception
@@ -49,15 +45,14 @@ async def get_current_user(
     # Check if user is active
     if not user.is_active:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="User account is inactive"
+            status_code=status.HTTP_403_FORBIDDEN, detail="User account is inactive"
         )
 
     # Check if email is verified
     if not user.is_email_verified:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Email address not verified. Please verify your email to continue."
+            detail="Email address not verified. Please verify your email to continue.",
         )
 
     return user

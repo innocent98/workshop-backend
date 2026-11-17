@@ -1,11 +1,12 @@
 """
 Location and geography utility functions using PostGIS.
 """
-from typing import Tuple, List, Optional
+
+from typing import Optional, Tuple
+
 import httpx
 from geoalchemy2 import Geometry
-from geoalchemy2.functions import ST_DWithin, ST_Distance, ST_MakePoint, ST_SetSRID
-from sqlalchemy import cast, Float
+from sqlalchemy import cast
 from sqlalchemy.sql import func
 
 from app.core.config import settings
@@ -32,10 +33,7 @@ def create_point(latitude: float, longitude: float) -> str:
 
 
 def calculate_distance_km(
-    point1_lat: float,
-    point1_lng: float,
-    point2_lat: float,
-    point2_lng: float
+    point1_lat: float, point1_lng: float, point2_lat: float, point2_lng: float
 ) -> float:
     """
     Calculate distance between two points in kilometers using Haversine formula.
@@ -50,7 +48,7 @@ def calculate_distance_km(
     Returns:
         Distance in kilometers
     """
-    from math import radians, sin, cos, sqrt, atan2
+    from math import atan2, cos, radians, sin, sqrt
 
     # Earth's radius in kilometers
     R = 6371.0
@@ -63,19 +61,14 @@ def calculate_distance_km(
     dlat = lat2 - lat1
     dlng = lng2 - lng1
 
-    a = sin(dlat / 2)**2 + cos(lat1) * cos(lat2) * sin(dlng / 2)**2
+    a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlng / 2) ** 2
     c = 2 * atan2(sqrt(a), sqrt(1 - a))
 
     distance = R * c
     return distance
 
 
-def distance_query(
-    point_column,
-    latitude: float,
-    longitude: float,
-    srid: int = 4326
-):
+def distance_query(point_column, latitude: float, longitude: float, srid: int = 4326):
     """
     Create a SQLAlchemy query expression for calculating distance to a point.
     Uses PostGIS ST_Distance function.
@@ -102,16 +95,12 @@ def distance_query(
     return func.ST_Distance(
         cast(point_column, Geometry),
         cast(point, Geometry),
-        True  # Use spheroid for accurate distance
+        True,  # Use spheroid for accurate distance
     )
 
 
 def within_radius_filter(
-    point_column,
-    latitude: float,
-    longitude: float,
-    radius_km: float,
-    srid: int = 4326
+    point_column, latitude: float, longitude: float, radius_km: float, srid: int = 4326
 ):
     """
     Create a SQLAlchemy filter for finding points within a radius.
@@ -141,10 +130,7 @@ def within_radius_filter(
     radius_meters = radius_km * 1000  # Convert km to meters
 
     return func.ST_DWithin(
-        cast(point_column, Geometry),
-        cast(point, Geometry),
-        radius_meters,
-        True  # Use spheroid
+        cast(point_column, Geometry), cast(point, Geometry), radius_meters, True  # Use spheroid
     )
 
 

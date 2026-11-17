@@ -8,8 +8,6 @@ on:
 
 jobs:
   # Lint is its own job so a lint failure never hides the test results.
-  # NOTE: main currently has ~59 files that fail `black --check` and many flake8 hits;
-  # this job stays red until a repo-wide format PR lands. New files are kept clean.
   lint:
     runs-on: ubuntu-latest
 

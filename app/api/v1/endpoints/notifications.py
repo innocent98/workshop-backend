@@ -5,8 +5,8 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 from app.db.models.push_device import PushDevice, PushPlatform
-from app.db.models.user_notification import UserNotification
 from app.db.models.user import User
+from app.db.models.user_notification import UserNotification
 from app.db.session import get_db
 from app.schemas.notification import (
     PushDeviceResponse,
@@ -55,11 +55,15 @@ async def unregister_push_device(
     db: Session = Depends(get_db),
 ):
     """Mark an FCM token inactive for the current user."""
-    device = db.query(PushDevice).filter(
-        PushDevice.user_id == current_user.id,
-        PushDevice.fcm_token == request.fcm_token,
-        PushDevice.is_active.is_(True),
-    ).first()
+    device = (
+        db.query(PushDevice)
+        .filter(
+            PushDevice.user_id == current_user.id,
+            PushDevice.fcm_token == request.fcm_token,
+            PushDevice.is_active.is_(True),
+        )
+        .first()
+    )
     if device:
         device.is_active = False
         device.last_seen_at = datetime.now(timezone.utc)

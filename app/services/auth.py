@@ -2,22 +2,24 @@
 Authentication service layer.
 Business logic for user registration, login, and password recovery.
 """
+
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 from uuid import UUID, uuid4
-from sqlalchemy.orm import Session
-from fastapi import HTTPException, status, UploadFile
 
-from app.db.models.user import User, UserType
+from fastapi import HTTPException, UploadFile, status
+from sqlalchemy.orm import Session
+
+from app.core.logger import log
+from app.core.security import create_access_token, get_password_hash, verify_password
 from app.db.models.artisan_profile import ArtisanProfile
 from app.db.models.otp import OTP, OTPType
-from app.db.models.service import Service, UserService
 from app.db.models.password_reset import PasswordResetToken
-from app.core.security import get_password_hash, verify_password, create_access_token
-from app.utils.otp import generate_otp, calculate_otp_expiry, is_otp_expired
+from app.db.models.service import Service, UserService
+from app.db.models.user import User, UserType
 from app.utils.email import send_otp_email, send_welcome_email
 from app.utils.file_upload import save_profile_picture
-from app.core.logger import log
+from app.utils.otp import calculate_otp_expiry, generate_otp, is_otp_expired
 
 
 def parse_uuid(user_id: str) -> UUID:
@@ -27,10 +29,10 @@ def parse_uuid(user_id: str) -> UUID:
     """
     try:
         return UUID(user_id)
-    except (ValueError, AttributeError, TypeError) as e:
+    except (ValueError, AttributeError, TypeError):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid user ID format. Expected UUID, got: {user_id}"
+            detail=f"Invalid user ID format. Expected UUID, got: {user_id}",
         )
 
 
@@ -53,16 +55,14 @@ class AuthService:
         existing_user = db.query(User).filter(User.email == email).first()
         if existing_user:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Email already registered"
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered"
             )
 
         # Check if phone number already exists
         existing_phone = db.query(User).filter(User.phone_number == phone_number).first()
         if existing_phone:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Phone number already registered"
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Phone number already registered"
             )
 
         # Create user (password not set yet, registration not completed)
@@ -93,10 +93,7 @@ class AuthService:
         uuid_id = parse_uuid(user_id)
         user = db.query(User).filter(User.id == uuid_id).first()
         if not user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
         # Hash and store password
         user.hashed_password = get_password_hash(password)
@@ -120,15 +117,12 @@ class AuthService:
 
         user = db.query(User).filter(User.id == uuid_id).first()
         if not user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
         if user.email.lower() != normalized_email:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Email does not match the registration record"
+                detail="Email does not match the registration record",
             )
 
         try:
@@ -136,7 +130,7 @@ class AuthService:
             db.query(OTP).filter(
                 OTP.user_id == uuid_id,
                 OTP.otp_type == OTPType.PHONE_VERIFICATION,
-                OTP.is_used.is_(False)
+                OTP.is_used.is_(False),
             ).update({"is_used": True})
 
             # Generate new OTP
@@ -170,7 +164,7 @@ class AuthService:
             log.error(f"Unexpected error while sending verification OTP: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to send verification OTP"
+                detail="Failed to send verification OTP",
             )
 
     @staticmethod
@@ -185,31 +179,26 @@ class AuthService:
         uuid_id = parse_uuid(user_id)
         user = db.query(User).filter(User.id == uuid_id).first()
         if not user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
         # Find the OTP
-        otp = db.query(OTP).filter(
-            OTP.user_id == uuid_id,
-            OTP.otp_code == otp_code,
-            OTP.otp_type == OTPType.PHONE_VERIFICATION,
-            OTP.is_used == False
-        ).first()
+        otp = (
+            db.query(OTP)
+            .filter(
+                OTP.user_id == uuid_id,
+                OTP.otp_code == otp_code,
+                OTP.otp_type == OTPType.PHONE_VERIFICATION,
+                OTP.is_used == False,
+            )
+            .first()
+        )
 
         if not otp:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid OTP code"
-            )
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid OTP code")
 
         # Check if OTP is expired
         if is_otp_expired(otp.expires_at):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="OTP has expired"
-            )
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="OTP has expired")
 
         # Mark OTP as used
         otp.is_used = True
@@ -220,9 +209,9 @@ class AuthService:
         # Temporary rule: once email is verified, auto-verify artisan profile.
         # This can be replaced later with stricter KYC/face-verification flow.
         if user.user_type == UserType.ARTISAN:
-            artisan_profile = db.query(ArtisanProfile).filter(
-                ArtisanProfile.user_id == user.id
-            ).first()
+            artisan_profile = (
+                db.query(ArtisanProfile).filter(ArtisanProfile.user_id == user.id).first()
+            )
             if not artisan_profile:
                 artisan_profile = ArtisanProfile(user_id=user.id)
                 db.add(artisan_profile)
@@ -250,16 +239,12 @@ class AuthService:
         uuid_id = parse_uuid(user_id)
         user = db.query(User).filter(User.id == uuid_id).first()
         if not user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
         # Verify user type matches
         if user.user_type.value != user_type:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="User type mismatch"
+                status_code=status.HTTP_400_BAD_REQUEST, detail="User type mismatch"
             )
 
         # Delete existing user services
@@ -269,10 +254,7 @@ class AuthService:
         for service_name in service_ids:
             service = db.query(Service).filter(Service.name == service_name).first()
             if service:
-                user_service = UserService(
-                    user_id=user.id,
-                    service_id=service.id
-                )
+                user_service = UserService(user_id=user.id, service_id=service.id)
                 db.add(user_service)
 
         db.commit()
@@ -295,10 +277,7 @@ class AuthService:
         uuid_id = parse_uuid(user_id)
         user = db.query(User).filter(User.id == uuid_id).first()
         if not user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
         # Update bio if provided
         if bio:
@@ -335,36 +314,30 @@ class AuthService:
         user = db.query(User).filter(User.email == email.lower()).first()
         if not user:
             raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid email or password"
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password"
             )
 
         # Verify password
         if not user.hashed_password or not verify_password(password, user.hashed_password):
             raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid email or password"
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password"
             )
 
         # Check if user is active
         if not user.is_active:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Account is inactive"
-            )
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is inactive")
 
         # Check if email is verified
         if not user.is_email_verified:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Email address not verified. Please verify your email to continue."
+                detail="Email address not verified. Please verify your email to continue.",
             )
 
         # Check if registration is completed
         if not user.registration_completed:
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Please complete your registration"
+                status_code=status.HTTP_403_FORBIDDEN, detail="Please complete your registration"
             )
 
         # Generate access token
@@ -445,9 +418,7 @@ class AuthService:
 
         # Invalidate any existing unused OTPs
         db.query(OTP).filter(
-            OTP.user_id == user.id,
-            OTP.otp_type == OTPType.PASSWORD_RESET,
-            OTP.is_used == False
+            OTP.user_id == user.id, OTP.otp_type == OTPType.PASSWORD_RESET, OTP.is_used == False
         ).update({"is_used": True})
 
         # Generate new OTP
@@ -482,30 +453,29 @@ class AuthService:
         """
         user = db.query(User).filter(User.email == email.lower()).first()
         if not user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
         # Find the OTP
-        otp = db.query(OTP).filter(
-            OTP.user_id == user.id,
-            OTP.otp_code == code,
-            OTP.otp_type == OTPType.PASSWORD_RESET,
-            OTP.is_used == False
-        ).first()
+        otp = (
+            db.query(OTP)
+            .filter(
+                OTP.user_id == user.id,
+                OTP.otp_code == code,
+                OTP.otp_type == OTPType.PASSWORD_RESET,
+                OTP.is_used == False,
+            )
+            .first()
+        )
 
         if not otp:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid reset code"
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid reset code"
             )
 
         # Check if OTP is expired
         if is_otp_expired(otp.expires_at):
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Reset code has expired"
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Reset code has expired"
             )
 
         # Mark OTP as used
@@ -539,29 +509,28 @@ class AuthService:
         """
         user = db.query(User).filter(User.email == email.lower()).first()
         if not user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
         # Find the reset token
-        token_obj = db.query(PasswordResetToken).filter(
-            PasswordResetToken.user_id == user.id,
-            PasswordResetToken.reset_token == reset_token,
-            PasswordResetToken.is_used == False
-        ).first()
+        token_obj = (
+            db.query(PasswordResetToken)
+            .filter(
+                PasswordResetToken.user_id == user.id,
+                PasswordResetToken.reset_token == reset_token,
+                PasswordResetToken.is_used == False,
+            )
+            .first()
+        )
 
         if not token_obj:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid reset token"
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid reset token"
             )
 
         # Check if token is expired
         if datetime.now(timezone.utc) > token_obj.expires_at:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Reset token has expired"
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Reset token has expired"
             )
 
         # Mark token as used
@@ -589,19 +558,18 @@ class AuthService:
         if not user.hashed_password:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Password change is not available for this account"
+                detail="Password change is not available for this account",
             )
 
         if not verify_password(current_password, user.hashed_password):
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Current password is incorrect"
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect"
             )
 
         if verify_password(new_password, user.hashed_password):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="New password must be different from current password"
+                detail="New password must be different from current password",
             )
 
         user.hashed_password = get_password_hash(new_password)
@@ -634,16 +602,11 @@ class AuthService:
             otp_type_enum = OTPType.PASSWORD_RESET
             purpose = "password_reset"
         else:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid OTP type"
-            )
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid OTP type")
 
         # Invalidate any existing unused OTPs
         db.query(OTP).filter(
-            OTP.user_id == user.id,
-            OTP.otp_type == otp_type_enum,
-            OTP.is_used == False
+            OTP.user_id == user.id, OTP.otp_type == otp_type_enum, OTP.is_used == False
         ).update({"is_used": True})
 
         # Generate new OTP

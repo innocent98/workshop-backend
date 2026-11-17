@@ -2,6 +2,7 @@
 OTP generation and validation utilities.
 Security best practices implemented.
 """
+
 import random
 import string
 from datetime import datetime, timedelta, timezone
@@ -17,7 +18,7 @@ def generate_otp(length: int = 6) -> str:
     Returns:
         String of random digits
     """
-    return ''.join(random.choices(string.digits, k=length))
+    return "".join(random.choices(string.digits, k=length))
 
 
 def calculate_otp_expiry(minutes: int = 10) -> datetime:

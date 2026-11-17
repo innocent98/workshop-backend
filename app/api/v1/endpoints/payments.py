@@ -1,20 +1,23 @@
 """
 Payment endpoints for managing Paystack transactions.
 """
-from typing import Optional
-from starlette.concurrency import run_in_threadpool
-from fastapi import APIRouter, Depends, HTTPException, status, Request, Header
-from sqlalchemy.orm import Session
+
 import json
 from decimal import Decimal
+from typing import Optional
 
-from app.db.session import get_db
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
+
 from app.api.deps import get_current_user
 from app.core.config import settings
-from app.db.models.user import User, UserType
+from app.core.logger import logger
 from app.db.models.booking import Booking, BookingStatus
 from app.db.models.payment import Payment, PaymentStatus
+from app.db.models.user import User, UserType
 from app.db.models.withdrawal import WithdrawalStatus
+from app.db.session import get_db
 from app.schemas.payment import (
     InitializePaymentRequest,
     InitializePaymentResponse,
@@ -22,10 +25,6 @@ from app.schemas.payment import (
     ReleasePaymentRequest,
     VerifyPaymentResponse,
 )
-from app.utils.payment_reference import generate_payment_reference
-from app.utils.commission import calculate_artisan_amount, calculate_platform_fee
-from app.services.paystack import PaystackService, PaystackError
-from app.core.logger import logger
 from app.services.payment_service import (
     OUTCOME_ALREADY,
     OUTCOME_MISMATCH,
@@ -35,9 +34,11 @@ from app.services.payment_service import (
     archive_payment_reference,
     find_payment_by_reference,
 )
+from app.services.paystack import PaystackError, PaystackService
 from app.services.withdrawal_service import settle_transfer_failure, settle_transfer_success
 from app.tasks.notification_tasks import send_push_notification
-
+from app.utils.commission import calculate_artisan_amount, calculate_platform_fee
+from app.utils.payment_reference import generate_payment_reference
 
 router = APIRouter()
 
@@ -53,6 +54,7 @@ def _payment_split(gross_amount: Decimal) -> tuple[Decimal, Decimal]:
     )
     return platform_fee, artisan_amount
 
+
 def _notify_user(user_id, title: str, body: str, data: Optional[dict] = None) -> None:
     try:
         send_push_notification.delay(
@@ -66,11 +68,13 @@ def _notify_user(user_id, title: str, body: str, data: Optional[dict] = None) ->
         pass
 
 
-@router.post("/initialize", response_model=InitializePaymentResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/initialize", response_model=InitializePaymentResponse, status_code=status.HTTP_201_CREATED
+)
 def initialize_payment(
     request: InitializePaymentRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Initialize payment for a booking.
@@ -81,35 +85,30 @@ def initialize_payment(
     # Only customers can initialize payments
     if current_user.user_type != UserType.CLIENT:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only customers can initialize payments"
+            status_code=status.HTTP_403_FORBIDDEN, detail="Only customers can initialize payments"
         )
 
     # Get booking
     booking = db.query(Booking).filter(Booking.id == request.booking_id).first()
     if not booking:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Booking not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
 
     # Check ownership
     if booking.customer_id != current_user.id:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You don't own this booking"
+            status_code=status.HTTP_403_FORBIDDEN, detail="You don't own this booking"
         )
 
     # Check booking status
     if booking.status != BookingStatus.ACCEPTED:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot pay for booking in {booking.status.value} status. Booking must be accepted by artisan first."
+            detail=f"Cannot pay for booking in {booking.status.value} status. Booking must be accepted by artisan first.",  # noqa: E501
         )
     if booking.agreed_amount is None or booking.agreed_amount <= 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Booking agreed amount must be greater than zero before payment can be initialized"
+            detail="Booking agreed amount must be greater than zero before payment can be initialized",  # noqa: E501
         )
 
     # Idempotency for repeated initialize attempts on same booking
@@ -156,7 +155,7 @@ def initialize_payment(
                     email=current_user.email,
                     amount=booking.agreed_amount,
                     reference=payment_reference,
-                    metadata=metadata
+                    metadata=metadata,
                 )
                 break
             except PaystackError as e:
@@ -171,13 +170,16 @@ def initialize_payment(
         platform_fee, artisan_amount = _payment_split(booking.agreed_amount)
 
         # If an existing failed/refunded record exists, reuse it for a new checkout attempt.
-        if existing_payment and existing_payment.status in [PaymentStatus.FAILED, PaymentStatus.REFUNDED]:
+        if existing_payment and existing_payment.status in [
+            PaymentStatus.FAILED,
+            PaymentStatus.REFUNDED,
+        ]:
             # keep the old reference(s): a late charge.success for them must still find this payment
             archive_payment_reference(db, existing_payment)
             existing_payment.payment_reference = payment_reference
-            existing_payment.paystack_reference = paystack_response.get('reference')
-            existing_payment.paystack_access_code = paystack_response.get('access_code')
-            existing_payment.authorization_url = paystack_response.get('authorization_url')
+            existing_payment.paystack_reference = paystack_response.get("reference")
+            existing_payment.paystack_access_code = paystack_response.get("access_code")
+            existing_payment.authorization_url = paystack_response.get("authorization_url")
             existing_payment.amount = booking.agreed_amount
             existing_payment.platform_fee = platform_fee
             existing_payment.artisan_amount = artisan_amount
@@ -198,10 +200,10 @@ def initialize_payment(
             # Create payment record
             payment = Payment(
                 payment_reference=payment_reference,
-                paystack_reference=paystack_response.get('reference'),
-                paystack_access_code=paystack_response.get('access_code'),
+                paystack_reference=paystack_response.get("reference"),
+                paystack_access_code=paystack_response.get("access_code"),
                 booking_id=booking.id,
-                authorization_url=paystack_response.get('authorization_url'),
+                authorization_url=paystack_response.get("authorization_url"),
                 amount=booking.agreed_amount,
                 platform_fee=platform_fee,
                 artisan_amount=artisan_amount,
@@ -209,7 +211,7 @@ def initialize_payment(
                 status=PaymentStatus.PENDING,
                 customer_email=current_user.email,
                 customer_name=current_user.full_name,
-                paystack_response=json.dumps(paystack_response)
+                paystack_response=json.dumps(paystack_response),
             )
 
             db.add(payment)
@@ -225,7 +227,7 @@ def initialize_payment(
             "platform_fee": payment.platform_fee,
             "artisan_amount": payment.artisan_amount,
             "status": payment.status.value,
-            "created_at": payment.created_at
+            "created_at": payment.created_at,
         }
 
     except PaystackError as e:
@@ -235,16 +237,13 @@ def initialize_payment(
             else status.HTTP_502_BAD_GATEWAY
         )
         raise HTTPException(
-            status_code=mapped_status,
-            detail=f"Payment initialization failed: {str(e)}"
+            status_code=mapped_status, detail=f"Payment initialization failed: {str(e)}"
         )
 
 
 @router.get("/verify/{reference}", response_model=VerifyPaymentResponse)
 def verify_payment(
-    reference: str,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    reference: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ):
     """
     Verify payment status.
@@ -254,24 +253,18 @@ def verify_payment(
     # Get payment by reference
     payment = find_payment_by_reference(db, reference)
     if not payment:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Payment not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found")
 
     # Get booking
     booking = db.query(Booking).filter(Booking.id == payment.booking_id).first()
     if not booking:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Booking not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
 
     # Check permission
     if booking.customer_id != current_user.id and booking.artisan_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You don't have permission to verify this payment"
+            detail="You don't have permission to verify this payment",
         )
     if payment.status in [PaymentStatus.SUCCESS, PaymentStatus.RELEASED]:
         if payment.platform_fee is None or payment.artisan_amount is None:
@@ -294,11 +287,11 @@ def verify_payment(
         logger.error(f"Paystack verify failed for {reference}: {e}")
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Could not verify payment with the payment provider. Please try again."
+            detail="Could not verify payment with the payment provider. Please try again.",
         )
 
-    paystack_status = verification_response.get('status')
-    if paystack_status == 'success':
+    paystack_status = verification_response.get("status")
+    if paystack_status == "success":
         # Same settlement function as the webhook: idempotent, amount/currency checked.
         result = apply_charge_success(db, reference, verification_response)
         db.refresh(payment)
@@ -315,10 +308,10 @@ def verify_payment(
             "status": payment.status.value,
             "amount": payment.amount,
             "paid": True,
-            "message": "Payment verified successfully"
+            "message": "Payment verified successfully",
         }
 
-    if paystack_status == 'failed':
+    if paystack_status == "failed":
         apply_charge_failed(db, reference, verification_response)
         db.refresh(payment)
         return {
@@ -326,7 +319,7 @@ def verify_payment(
             "status": payment.status.value,
             "amount": payment.amount,
             "paid": False,
-            "message": "Payment verification failed"
+            "message": "Payment verification failed",
         }
 
     # abandoned / ongoing / pending: the customer has not finished paying yet.
@@ -335,14 +328,14 @@ def verify_payment(
         "status": payment.status.value,
         "amount": payment.amount,
         "paid": False,
-        "message": "Payment not completed yet"
+        "message": "Payment not completed yet",
     }
 
 
 def _handle_webhook_event(db: Session, event: Optional[str], data: dict) -> dict:
     """Blocking part of the webhook (DB locks, row updates): runs in the threadpool."""
-    if event == 'charge.success':
-        reference = data.get('reference')
+    if event == "charge.success":
+        reference = data.get("reference")
         if not reference:
             return {"status": "ignored", "message": "No reference in payload"}
         result = apply_charge_success(db, reference, data)
@@ -355,8 +348,8 @@ def _handle_webhook_event(db: Session, event: Optional[str], data: dict) -> dict
             return {"status": "success", "message": "Payment already processed"}
         return {"status": "success", "message": "Payment processed"}
 
-    if event == 'charge.failed':
-        reference = data.get('reference')
+    if event == "charge.failed":
+        reference = data.get("reference")
         if not reference:
             return {"status": "ignored", "message": "No reference in payload"}
         result = apply_charge_failed(db, reference, data)
@@ -364,13 +357,13 @@ def _handle_webhook_event(db: Session, event: Optional[str], data: dict) -> dict
             return {"status": "ignored", "message": "Payment not found"}
         return {"status": "success", "message": "Payment failure recorded"}
 
-    if event == 'transfer.success':
+    if event == "transfer.success":
         outcome = settle_transfer_success(db, data)
         return {"status": "success", "message": f"Transfer {outcome}"}
 
-    if event in ('transfer.failed', 'transfer.reversed'):
+    if event in ("transfer.failed", "transfer.reversed"):
         new_status = (
-            WithdrawalStatus.FAILED if event == 'transfer.failed' else WithdrawalStatus.REVERSED
+            WithdrawalStatus.FAILED if event == "transfer.failed" else WithdrawalStatus.REVERSED
         )
         outcome = settle_transfer_failure(db, data, new_status)
         return {"status": "success", "message": f"Transfer {outcome}"}
@@ -382,7 +375,7 @@ def _handle_webhook_event(db: Session, event: Optional[str], data: dict) -> dict
 async def paystack_webhook(
     request: Request,
     x_paystack_signature: Optional[str] = Header(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Paystack webhook handler.
@@ -394,31 +387,27 @@ async def paystack_webhook(
     body = await request.body()
 
     # Verify webhook signature
-    if not x_paystack_signature or not PaystackService.verify_webhook_signature(x_paystack_signature, body):
+    if not x_paystack_signature or not PaystackService.verify_webhook_signature(
+        x_paystack_signature, body
+    ):
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid webhook signature"
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid webhook signature"
         )
 
     # Parse webhook payload
     try:
         payload = json.loads(body)
     except json.JSONDecodeError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid JSON payload"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON payload")
 
-    event = payload.get('event')
-    data = payload.get('data') or {}
+    event = payload.get("event")
+    data = payload.get("data") or {}
     return await run_in_threadpool(_handle_webhook_event, db, event, data)
 
 
 @router.get("/{payment_id}", response_model=PaymentResponse)
 async def get_payment(
-    payment_id: int,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    payment_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ):
     """
     Get payment details.
@@ -427,24 +416,18 @@ async def get_payment(
     """
     payment = db.query(Payment).filter(Payment.id == payment_id).first()
     if not payment:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Payment not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found")
 
     # Get booking
     booking = db.query(Booking).filter(Booking.id == payment.booking_id).first()
     if not booking:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Booking not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
 
     # Check permission
     if booking.customer_id != current_user.id and booking.artisan_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You don't have permission to view this payment"
+            detail="You don't have permission to view this payment",
         )
 
     return payment
@@ -466,5 +449,5 @@ async def release_payment(
     """
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
-        detail="Manual payment release is disabled. Withdraw your balance from the wallet instead."
+        detail="Manual payment release is disabled. Withdraw your balance from the wallet instead.",
     )

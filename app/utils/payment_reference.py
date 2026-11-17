@@ -1,5 +1,6 @@
-from datetime import datetime, timezone
 import random
+from datetime import datetime, timezone
+
 from sqlalchemy.orm import Session
 
 

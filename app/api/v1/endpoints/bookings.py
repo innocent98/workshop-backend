@@ -1,40 +1,40 @@
 """
 Booking endpoints for managing service bookings.
 """
-from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form
-from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func, or_
-from geoalchemy2.elements import WKTElement
-from datetime import datetime, timedelta, timezone
-import json
 
-from app.db.session import get_db
+import json
+from datetime import datetime, timedelta, timezone
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from geoalchemy2.elements import WKTElement
+from sqlalchemy import func
+from sqlalchemy.orm import Session, joinedload
+
 from app.api.deps import get_current_user
 from app.core.config import settings
-from app.db.models.user import User, UserType
 from app.db.models.booking import Booking, BookingStatus
 from app.db.models.booking_progress_log import BookingProgressLog
 from app.db.models.service import Service, UserService
-from app.db.models.artisan_profile import ArtisanProfile
+from app.db.models.user import User, UserType
+from app.db.session import get_db
 from app.schemas.booking import (
-    CreateBookingRequest,
     AcceptBookingRequest,
-    RejectBookingRequest,
-    CancelBookingRequest,
-    CompleteBookingRequest,
-    NegotiateBookingRequest,
-    NegotiateResponseRequest,
-    DisputeCompletionRequest,
+    BookingListResponse,
     BookingProgressLogResponse,
     BookingResponse,
-    BookingListResponse,
     BookingStatsResponse,
+    CancelBookingRequest,
+    CompleteBookingRequest,
+    CreateBookingRequest,
+    DisputeCompletionRequest,
+    NegotiateBookingRequest,
+    NegotiateResponseRequest,
+    RejectBookingRequest,
 )
+from app.tasks.notification_tasks import send_push_notification
 from app.utils.booking_reference import generate_booking_reference
 from app.utils.file_upload import save_booking_progress_image
-from app.tasks.notification_tasks import send_push_notification
-
 
 router = APIRouter()
 NEGOTIATION_STATUS_NONE = "none"
@@ -43,6 +43,7 @@ NEGOTIATION_STATUS_PENDING_ARTISAN = "pending_artisan"
 NEGOTIATION_STATUS_AGREED = "agreed"
 NEGOTIATION_STATUS_DECLINED = "declined"
 NEGOTIATION_MAX_ROUNDS_PER_SIDE = 2
+
 
 def _notify_user(user_id, title: str, body: str, data: Optional[dict] = None) -> None:
     try:
@@ -120,14 +121,10 @@ def _booking_to_response(booking: Booking, db: Session) -> dict:
 
     if selected_service_ids:
         selected_services = (
-            db.query(Service.id, Service.name)
-            .filter(Service.id.in_(selected_service_ids))
-            .all()
+            db.query(Service.id, Service.name).filter(Service.id.in_(selected_service_ids)).all()
         )
         by_id = {sid: name for sid, name in selected_services}
-        selected_service_names = [
-            by_id[sid] for sid in selected_service_ids if sid in by_id
-        ]
+        selected_service_names = [by_id[sid] for sid in selected_service_ids if sid in by_id]
     elif booking.service_id:
         selected_service_ids = [booking.service_id]
         if booking.service:
@@ -142,10 +139,14 @@ def _booking_to_response(booking: Booking, db: Session) -> dict:
         "selected_service_ids": selected_service_ids,
         "selected_service_names": selected_service_names,
         "customer_name": booking.customer.full_name if booking.customer else None,
-        "customer_profile_picture_url": booking.customer.profile_picture_url if booking.customer else None,
+        "customer_profile_picture_url": (
+            booking.customer.profile_picture_url if booking.customer else None
+        ),
         "customer_phone_number": booking.customer.phone_number if booking.customer else None,
         "artisan_name": booking.artisan.full_name if booking.artisan else None,
-        "artisan_profile_picture_url": booking.artisan.profile_picture_url if booking.artisan else None,
+        "artisan_profile_picture_url": (
+            booking.artisan.profile_picture_url if booking.artisan else None
+        ),
         "artisan_phone_number": booking.artisan.phone_number if booking.artisan else None,
         "service_name": booking.service.name if booking.service else None,
         "service_image": booking.service.image if booking.service else None,
@@ -193,7 +194,7 @@ def _booking_to_response(booking: Booking, db: Session) -> dict:
 async def create_booking(
     request: CreateBookingRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Create a new booking request.
@@ -203,20 +204,22 @@ async def create_booking(
     # Only customers can create bookings
     if current_user.user_type != UserType.CLIENT:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only customers can create bookings"
+            status_code=status.HTTP_403_FORBIDDEN, detail="Only customers can create bookings"
         )
 
     # Verify artisan exists and is active
-    artisan = db.query(User).filter(
-        User.id == request.artisan_id,
-        User.user_type == UserType.ARTISAN,
-        User.is_active == True
-    ).first()
+    artisan = (
+        db.query(User)
+        .filter(
+            User.id == request.artisan_id,
+            User.user_type == UserType.ARTISAN,
+            User.is_active == True,
+        )
+        .first()
+    )
     if not artisan:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Artisan not found or inactive"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Artisan not found or inactive"
         )
 
     requested_service_ids = request.service_ids or (
@@ -229,11 +232,7 @@ async def create_booking(
             detail="At least one service must be selected",
         )
 
-    selected_services = (
-        db.query(Service)
-        .filter(Service.id.in_(requested_service_ids))
-        .all()
-    )
+    selected_services = db.query(Service).filter(Service.id.in_(requested_service_ids)).all()
     if len(selected_services) != len(requested_service_ids):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -261,7 +260,7 @@ async def create_booking(
     booking_reference = generate_booking_reference(db)
 
     # Create PostGIS POINT from latitude and longitude
-    job_location = WKTElement(f'POINT({request.job_longitude} {request.job_latitude})', srid=4326)
+    job_location = WKTElement(f"POINT({request.job_longitude} {request.job_latitude})", srid=4326)
 
     # Create booking
     booking = Booking(
@@ -276,7 +275,7 @@ async def create_booking(
         job_address=request.job_address,
         budget_min=request.budget_min,
         budget_max=request.budget_max,
-        status=BookingStatus.PENDING
+        status=BookingStatus.PENDING,
     )
 
     db.add(booking)
@@ -299,7 +298,7 @@ async def list_bookings(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     List user's bookings.
@@ -309,19 +308,27 @@ async def list_bookings(
     """
     # Base query based on user type
     if current_user.user_type == UserType.CLIENT:
-        query = db.query(Booking).options(
-            joinedload(Booking.customer),
-            joinedload(Booking.artisan),
-            joinedload(Booking.service),
-            joinedload(Booking.progress_logs),
-        ).filter(Booking.customer_id == current_user.id)
+        query = (
+            db.query(Booking)
+            .options(
+                joinedload(Booking.customer),
+                joinedload(Booking.artisan),
+                joinedload(Booking.service),
+                joinedload(Booking.progress_logs),
+            )
+            .filter(Booking.customer_id == current_user.id)
+        )
     else:
-        query = db.query(Booking).options(
-            joinedload(Booking.customer),
-            joinedload(Booking.artisan),
-            joinedload(Booking.service),
-            joinedload(Booking.progress_logs),
-        ).filter(Booking.artisan_id == current_user.id)
+        query = (
+            db.query(Booking)
+            .options(
+                joinedload(Booking.customer),
+                joinedload(Booking.artisan),
+                joinedload(Booking.service),
+                joinedload(Booking.progress_logs),
+            )
+            .filter(Booking.artisan_id == current_user.id)
+        )
 
     # Apply status filter
     if status_filter:
@@ -330,28 +337,31 @@ async def list_bookings(
             query = query.filter(Booking.status == status_enum)
         except ValueError:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid status: {status_filter}"
+                status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid status: {status_filter}"
             )
 
     # Get total count
     total = query.count()
 
     # Apply pagination
-    bookings = query.order_by(Booking.created_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
+    bookings = (
+        query.order_by(Booking.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
 
     return {
         "bookings": [_booking_to_response(b, db) for b in bookings],
         "total": total,
         "page": page,
-        "page_size": page_size
+        "page_size": page_size,
     }
 
 
 @router.get("/stats", response_model=BookingStatsResponse)
 async def get_booking_stats(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ):
     """
     Get user's booking statistics.
@@ -370,7 +380,9 @@ async def get_booking_stats(
         "pending_bookings": base_query.filter(Booking.status == BookingStatus.PENDING).count(),
         "accepted_bookings": base_query.filter(Booking.status == BookingStatus.ACCEPTED).count(),
         "paid_bookings": base_query.filter(Booking.status == BookingStatus.PAID).count(),
-        "in_progress_bookings": base_query.filter(Booking.status == BookingStatus.IN_PROGRESS).count(),
+        "in_progress_bookings": base_query.filter(
+            Booking.status == BookingStatus.IN_PROGRESS
+        ).count(),
         "completed_bookings": base_query.filter(Booking.status == BookingStatus.COMPLETED).count(),
         "cancelled_bookings": base_query.filter(Booking.status == BookingStatus.CANCELLED).count(),
         "rejected_bookings": base_query.filter(Booking.status == BookingStatus.REJECTED).count(),
@@ -382,32 +394,32 @@ async def get_booking_stats(
 
 @router.get("/{booking_id}", response_model=BookingResponse)
 async def get_booking(
-    booking_id: int,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    booking_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ):
     """
     Get booking details.
 
     Only customer or artisan involved in the booking can view it.
     """
-    booking = db.query(Booking).options(
-        joinedload(Booking.customer),
-        joinedload(Booking.artisan),
-        joinedload(Booking.service),
-        joinedload(Booking.progress_logs),
-    ).filter(Booking.id == booking_id).first()
-    if not booking:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Booking not found"
+    booking = (
+        db.query(Booking)
+        .options(
+            joinedload(Booking.customer),
+            joinedload(Booking.artisan),
+            joinedload(Booking.service),
+            joinedload(Booking.progress_logs),
         )
+        .filter(Booking.id == booking_id)
+        .first()
+    )
+    if not booking:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
 
     # Check permission
     if booking.customer_id != current_user.id and booking.artisan_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You don't have permission to view this booking"
+            detail="You don't have permission to view this booking",
         )
 
     return _booking_to_response(booking, db)
@@ -418,7 +430,7 @@ async def negotiate_booking(
     booking_id: int,
     request: NegotiateBookingRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Artisan starts/counters negotiation on a pending booking.
@@ -430,20 +442,16 @@ async def negotiate_booking(
     if current_user.user_type != UserType.ARTISAN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only artisans can negotiate booking price"
+            detail="Only artisans can negotiate booking price",
         )
 
     booking = db.query(Booking).filter(Booking.id == booking_id).first()
     if not booking:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Booking not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
 
     if booking.artisan_id != current_user.id:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You are not assigned to this booking"
+            status_code=status.HTTP_403_FORBIDDEN, detail="You are not assigned to this booking"
         )
 
     _ensure_pending_booking(booking, "negotiate")
@@ -454,19 +462,22 @@ async def negotiate_booking(
     if current_status in {NEGOTIATION_STATUS_AGREED, NEGOTIATION_STATUS_DECLINED}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Negotiation is already closed for this booking"
+            detail="Negotiation is already closed for this booking",
         )
 
-    if booking.negotiation_last_offer_by == "artisan" and current_status == NEGOTIATION_STATUS_PENDING_CLIENT:
+    if (
+        booking.negotiation_last_offer_by == "artisan"
+        and current_status == NEGOTIATION_STATUS_PENDING_CLIENT
+    ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Waiting for client response to your last offer"
+            detail="Waiting for client response to your last offer",
         )
 
     if booking.artisan_negotiation_rounds_used >= NEGOTIATION_MAX_ROUNDS_PER_SIDE:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Artisan negotiation rounds exhausted (max 2)"
+            detail="Artisan negotiation rounds exhausted (max 2)",
         )
 
     # First offer must come from artisan; this endpoint enforces artisan identity already.
@@ -489,7 +500,7 @@ async def negotiate_booking(
     _notify_user(
         booking.customer_id,
         "New price negotiation",
-        f"Artisan proposed ₦{float(request.negotiated_amount):.0f}. Round {booking.artisan_negotiation_rounds_used}/2.",
+        f"Artisan proposed ₦{float(request.negotiated_amount):.0f}. Round {booking.artisan_negotiation_rounds_used}/2.",  # noqa: E501
         {"booking_id": str(booking.id), "event": "booking_negotiation_proposed"},
     )
 
@@ -501,7 +512,7 @@ async def respond_to_negotiation(
     booking_id: int,
     request: NegotiateResponseRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Client responds to artisan negotiation (agree/counter/decline).
@@ -514,20 +525,16 @@ async def respond_to_negotiation(
     if current_user.user_type != UserType.CLIENT:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only customers can respond to negotiation"
+            detail="Only customers can respond to negotiation",
         )
 
     booking = db.query(Booking).filter(Booking.id == booking_id).first()
     if not booking:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Booking not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
 
     if booking.customer_id != current_user.id:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You don't own this booking"
+            status_code=status.HTTP_403_FORBIDDEN, detail="You don't own this booking"
         )
 
     _ensure_pending_booking(booking, "respond to negotiation")
@@ -539,20 +546,20 @@ async def respond_to_negotiation(
     if current_status in {NEGOTIATION_STATUS_NONE, NEGOTIATION_STATUS_DECLINED}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No active artisan negotiation to respond to"
+            detail="No active artisan negotiation to respond to",
         )
 
     if current_status == NEGOTIATION_STATUS_PENDING_ARTISAN and action != "decline":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Waiting for artisan response; you can only decline now"
+            detail="Waiting for artisan response; you can only decline now",
         )
 
     if action == "agree":
         if booking.negotiated_amount is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No negotiated amount available to agree on"
+                detail="No negotiated amount available to agree on",
             )
 
         booking.agreed_amount = booking.negotiated_amount
@@ -579,17 +586,17 @@ async def respond_to_negotiation(
         if request.negotiated_amount is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="negotiated_amount is required for counter action"
+                detail="negotiated_amount is required for counter action",
             )
         if not request.negotiation_condition:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="negotiation_condition is required for counter action"
+                detail="negotiation_condition is required for counter action",
             )
         if booking.client_negotiation_rounds_used >= NEGOTIATION_MAX_ROUNDS_PER_SIDE:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Client negotiation rounds exhausted (max 2)"
+                detail="Client negotiation rounds exhausted (max 2)",
             )
 
         booking.negotiated_amount = request.negotiated_amount
@@ -605,7 +612,7 @@ async def respond_to_negotiation(
         _notify_user(
             booking.artisan_id,
             "Client counter-offer received",
-            f"Client proposed ₦{float(request.negotiated_amount):.0f}. Round {booking.client_negotiation_rounds_used}/2.",
+            f"Client proposed ₦{float(request.negotiated_amount):.0f}. Round {booking.client_negotiation_rounds_used}/2.",  # noqa: E501
             {"booking_id": str(booking.id), "event": "booking_negotiation_countered"},
         )
         return _booking_to_response(booking, db)
@@ -636,7 +643,7 @@ async def accept_booking(
     booking_id: int,
     request: AcceptBookingRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Artisan accepts a booking.
@@ -646,31 +653,26 @@ async def accept_booking(
     # Only artisans can accept bookings
     if current_user.user_type != UserType.ARTISAN:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only artisans can accept bookings"
+            status_code=status.HTTP_403_FORBIDDEN, detail="Only artisans can accept bookings"
         )
 
     booking = db.query(Booking).filter(Booking.id == booking_id).first()
     if not booking:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Booking not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
 
     # Check if artisan is assigned to this booking
     if booking.artisan_id != current_user.id:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You are not assigned to this booking"
+            status_code=status.HTTP_403_FORBIDDEN, detail="You are not assigned to this booking"
         )
 
     _ensure_pending_booking(booking, "accept")
 
     # If negotiation has reached client counter/agreement state, artisan accepts
     # the latest negotiated amount (outside budget range allowed with override).
-    if (
-        booking.negotiated_amount is not None and
-        (booking.negotiation_status in {NEGOTIATION_STATUS_PENDING_ARTISAN, NEGOTIATION_STATUS_AGREED})
+    if booking.negotiated_amount is not None and (
+        booking.negotiation_status
+        in {NEGOTIATION_STATUS_PENDING_ARTISAN, NEGOTIATION_STATUS_AGREED}
     ):
         booking.agreed_amount = booking.negotiated_amount
         booking.negotiated_override = not (
@@ -684,7 +686,7 @@ async def accept_booking(
         if not (booking.budget_min <= request.agreed_amount <= booking.budget_max):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Agreed amount must be between {booking.budget_min} and {booking.budget_max}"
+                detail=f"Agreed amount must be between {booking.budget_min} and {booking.budget_max}",  # noqa: E501
             )
         booking.agreed_amount = request.agreed_amount
         booking.negotiated_override = False
@@ -710,7 +712,7 @@ async def reject_booking(
     booking_id: int,
     request: RejectBookingRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Artisan rejects a booking.
@@ -720,29 +722,24 @@ async def reject_booking(
     # Only artisans can reject bookings
     if current_user.user_type != UserType.ARTISAN:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only artisans can reject bookings"
+            status_code=status.HTTP_403_FORBIDDEN, detail="Only artisans can reject bookings"
         )
 
     booking = db.query(Booking).filter(Booking.id == booking_id).first()
     if not booking:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Booking not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
 
     # Check if artisan is assigned to this booking
     if booking.artisan_id != current_user.id:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You are not assigned to this booking"
+            status_code=status.HTTP_403_FORBIDDEN, detail="You are not assigned to this booking"
         )
 
     # Check if booking is in PENDING status
     if booking.status != BookingStatus.PENDING:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot reject booking in {booking.status.value} status"
+            detail=f"Cannot reject booking in {booking.status.value} status",
         )
 
     # Update booking
@@ -764,9 +761,7 @@ async def reject_booking(
 
 @router.patch("/{booking_id}/start", response_model=BookingResponse)
 async def start_booking(
-    booking_id: int,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    booking_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ):
     """
     Artisan marks booking as started.
@@ -776,29 +771,24 @@ async def start_booking(
     # Only artisans can start bookings
     if current_user.user_type != UserType.ARTISAN:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only artisans can start bookings"
+            status_code=status.HTTP_403_FORBIDDEN, detail="Only artisans can start bookings"
         )
 
     booking = db.query(Booking).filter(Booking.id == booking_id).first()
     if not booking:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Booking not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
 
     # Check if artisan is assigned to this booking
     if booking.artisan_id != current_user.id:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You are not assigned to this booking"
+            status_code=status.HTTP_403_FORBIDDEN, detail="You are not assigned to this booking"
         )
 
     # Check if booking is in PAID status
     if booking.status != BookingStatus.PAID:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot start booking in {booking.status.value} status. Payment must be completed first."
+            detail=f"Cannot start booking in {booking.status.value} status. Payment must be completed first.",  # noqa: E501
         )
 
     # Update booking
@@ -946,7 +936,7 @@ async def complete_booking(
     booking_id: int,
     request: CompleteBookingRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Artisan marks booking as completed.
@@ -956,34 +946,32 @@ async def complete_booking(
     # Only artisans can complete bookings
     if current_user.user_type != UserType.ARTISAN:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only artisans can complete bookings"
+            status_code=status.HTTP_403_FORBIDDEN, detail="Only artisans can complete bookings"
         )
 
     booking = db.query(Booking).filter(Booking.id == booking_id).first()
     if not booking:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Booking not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
 
     # Check if artisan is assigned to this booking
     if booking.artisan_id != current_user.id:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You are not assigned to this booking"
+            status_code=status.HTTP_403_FORBIDDEN, detail="You are not assigned to this booking"
         )
 
     # Check if booking is in IN_PROGRESS status
     if booking.status != BookingStatus.IN_PROGRESS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot complete booking in {booking.status.value} status"
+            detail=f"Cannot complete booking in {booking.status.value} status",
         )
 
-    progress_count = db.query(func.count(BookingProgressLog.id)).filter(
-        BookingProgressLog.booking_id == booking.id
-    ).scalar() or 0
+    progress_count = (
+        db.query(func.count(BookingProgressLog.id))
+        .filter(BookingProgressLog.booking_id == booking.id)
+        .scalar()
+        or 0
+    )
     if progress_count < 1:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1022,9 +1010,7 @@ async def complete_booking(
 
 @router.patch("/{booking_id}/confirm-completion", response_model=BookingResponse)
 async def confirm_booking_completion(
-    booking_id: int,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    booking_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ):
     """
     Customer confirms completed job.
@@ -1033,33 +1019,28 @@ async def confirm_booking_completion(
     """
     if current_user.user_type != UserType.CLIENT:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only customers can confirm completion"
+            status_code=status.HTTP_403_FORBIDDEN, detail="Only customers can confirm completion"
         )
 
     booking = db.query(Booking).filter(Booking.id == booking_id).first()
     if not booking:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Booking not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
 
     if booking.customer_id != current_user.id:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You don't own this booking"
+            status_code=status.HTTP_403_FORBIDDEN, detail="You don't own this booking"
         )
 
     if booking.status != BookingStatus.COMPLETED:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot confirm completion for booking in {booking.status.value} status"
+            detail=f"Cannot confirm completion for booking in {booking.status.value} status",
         )
 
     if booking.completion_disputed_at:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Completion is disputed and cannot be confirmed"
+            detail="Completion is disputed and cannot be confirmed",
         )
 
     booking.completion_confirmed_by_client_at = datetime.now(timezone.utc)
@@ -1079,7 +1060,7 @@ async def dispute_booking_completion(
     booking_id: int,
     request: DisputeCompletionRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Customer disputes a completion marked by artisan.
@@ -1088,33 +1069,27 @@ async def dispute_booking_completion(
     """
     if current_user.user_type != UserType.CLIENT:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only customers can dispute completion"
+            status_code=status.HTTP_403_FORBIDDEN, detail="Only customers can dispute completion"
         )
 
     booking = db.query(Booking).filter(Booking.id == booking_id).first()
     if not booking:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Booking not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
 
     if booking.customer_id != current_user.id:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You don't own this booking"
+            status_code=status.HTTP_403_FORBIDDEN, detail="You don't own this booking"
         )
 
     if booking.status != BookingStatus.COMPLETED:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot dispute completion for booking in {booking.status.value} status"
+            detail=f"Cannot dispute completion for booking in {booking.status.value} status",
         )
 
     if booking.completion_confirmed_by_client_at:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Completion already confirmed"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Completion already confirmed"
         )
 
     now_utc = datetime.now(timezone.utc)
@@ -1123,8 +1098,7 @@ async def dispute_booking_completion(
         and now_utc > booking.completion_confirmation_deadline_at
     ):
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Dispute window has elapsed"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Dispute window has elapsed"
         )
 
     booking.status = BookingStatus.DISPUTED
@@ -1141,7 +1115,7 @@ async def cancel_booking(
     booking_id: int,
     request: CancelBookingRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Customer cancels a booking.
@@ -1151,29 +1125,24 @@ async def cancel_booking(
     # Only customers can cancel bookings
     if current_user.user_type != UserType.CLIENT:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only customers can cancel bookings"
+            status_code=status.HTTP_403_FORBIDDEN, detail="Only customers can cancel bookings"
         )
 
     booking = db.query(Booking).filter(Booking.id == booking_id).first()
     if not booking:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Booking not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
 
     # Check if customer owns this booking
     if booking.customer_id != current_user.id:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You don't own this booking"
+            status_code=status.HTTP_403_FORBIDDEN, detail="You don't own this booking"
         )
 
     # Check if booking can be cancelled
     if booking.status not in [BookingStatus.PENDING, BookingStatus.ACCEPTED]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot cancel booking in {booking.status.value} status. Contact support for paid bookings."
+            detail=f"Cannot cancel booking in {booking.status.value} status. Contact support for paid bookings.",  # noqa: E501
         )
 
     # Update booking

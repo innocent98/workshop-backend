@@ -2,53 +2,55 @@
 Authentication endpoints.
 Implements all 13 authentication endpoints from API documentation.
 """
-from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Request
-from sqlalchemy.orm import Session
-import firebase_admin
-from firebase_admin import auth as firebase_auth, credentials
 
+from typing import Optional
+
+import firebase_admin
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
+from firebase_admin import auth as firebase_auth
+from firebase_admin import credentials
+from sqlalchemy.orm import Session
+
+from app.api.deps import get_current_user
+from app.core.config import settings
+from app.core.logger import log
+from app.core.rate_limit import limiter
+from app.core.token_blacklist import blacklist_token
+from app.db.models.service import Service, UserService
+from app.db.models.user import User
 from app.db.session import get_db
-from app.services.auth import AuthService
 from app.schemas.auth import (
-    PersonalInfoRequest,
-    PersonalInfoResponse,
-    SetPasswordRequest,
-    SetPasswordResponse,
-    SendOTPRequest,
-    SendOTPResponse,
-    VerifyOTPRequest,
-    VerifyOTPResponse,
-    SelectServicesRequest,
-    SelectServicesResponse,
+    ChangePasswordRequest,
+    ChangePasswordResponse,
     CompleteProfileResponse,
-    UserResponse,
-    LoginRequest,
-    LoginResponse,
-    GoogleSignInRequest,
-    GoogleSignInResponse,
+    ForgotPasswordResetRequest,
+    ForgotPasswordResetResponse,
     ForgotPasswordSendCodeRequest,
     ForgotPasswordSendCodeResponse,
     ForgotPasswordVerifyCodeRequest,
     ForgotPasswordVerifyCodeResponse,
-    ForgotPasswordResetRequest,
-    ForgotPasswordResetResponse,
-    ChangePasswordRequest,
-    ChangePasswordResponse,
+    GoogleSignInRequest,
+    GoogleSignInResponse,
+    LoginRequest,
+    LoginResponse,
+    LogoutResponse,
+    MyServicesResponse,
+    PersonalInfoRequest,
+    PersonalInfoResponse,
     ResendOTPRequest,
     ResendOTPResponse,
-    LogoutResponse,
+    SelectServicesRequest,
+    SelectServicesResponse,
+    SendOTPRequest,
+    SendOTPResponse,
+    SetPasswordRequest,
+    SetPasswordResponse,
     UpdateMyServicesRequest,
-    MyServicesResponse,
+    UserResponse,
+    VerifyOTPRequest,
+    VerifyOTPResponse,
 )
-from app.core.logger import log
-from app.api.deps import get_current_user
-from app.core.token_blacklist import blacklist_token
-from app.db.models.user import User
-from app.db.models.service import UserService, Service
-from app.core.config import settings
-from app.core.rate_limit import limiter
-
+from app.services.auth import AuthService
 
 router = APIRouter()
 
@@ -56,6 +58,7 @@ router = APIRouter()
 # ============================================================================
 # REGISTRATION ENDPOINTS
 # ============================================================================
+
 
 @router.post(
     "/register/personal-info",
@@ -132,8 +135,7 @@ async def register_send_otp(
 
     if not success:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to send OTP email"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to send OTP email"
         )
 
     return SendOTPResponse(
@@ -224,6 +226,7 @@ async def register_complete_profile(
 # ============================================================================
 # LOGIN ENDPOINTS
 # ============================================================================
+
 
 @router.post(
     "/login",
@@ -354,6 +357,7 @@ def replace_my_services(
 # PASSWORD RECOVERY ENDPOINTS
 # ============================================================================
 
+
 @router.post(
     "/forgot-password/send-code",
     response_model=ForgotPasswordSendCodeResponse,
@@ -458,6 +462,7 @@ def change_password(
 # ============================================================================
 # UTILITY ENDPOINTS
 # ============================================================================
+
 
 @router.post(
     "/resend-otp",

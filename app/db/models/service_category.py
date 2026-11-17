@@ -1,9 +1,10 @@
 """
 Service Category models for organizing services.
 """
-from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean
-from sqlalchemy.sql import func
+
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text
 from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
 
 from app.db.base import Base
 
@@ -20,6 +21,7 @@ class ServiceCategory(Base):
     - Painting
     - Cleaning
     """
+
     __tablename__ = "service_categories"
 
     id = Column(Integer, primary_key=True, index=True)

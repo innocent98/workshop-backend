@@ -1,26 +1,28 @@
 import enum
-from sqlalchemy import (
-    Boolean, Column, Integer, String, Text, DateTime, ForeignKey,
-    Enum as SQLEnum, DECIMAL
-)
-from sqlalchemy.sql import func
+
+from sqlalchemy import DECIMAL, Boolean, Column, DateTime
+from sqlalchemy import Enum as SQLEnum
+from sqlalchemy import ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
 
 from app.db.base import Base
 
 
 class PaymentStatus(str, enum.Enum):
     """Payment status enumeration"""
-    PENDING = "pending"         # Payment initiated
-    PROCESSING = "processing"   # Being processed
-    SUCCESS = "success"         # Paid, funds held by Paystack
-    FAILED = "failed"          # Payment failed
-    RELEASED = "released"       # Funds released to artisan
-    REFUNDED = "refunded"       # Refunded to customer
+
+    PENDING = "pending"  # Payment initiated
+    PROCESSING = "processing"  # Being processed
+    SUCCESS = "success"  # Paid, funds held by Paystack
+    FAILED = "failed"  # Payment failed
+    RELEASED = "released"  # Funds released to artisan
+    REFUNDED = "refunded"  # Refunded to customer
 
 
 class PaymentMethod(str, enum.Enum):
     """Payment method enumeration"""
+
     CARD = "card"
     BANK_TRANSFER = "bank_transfer"
     USSD = "ussd"
@@ -40,6 +42,7 @@ class Payment(Base):
 
     Handles payment initialization, verification, and fund release.
     """
+
     __tablename__ = "payments"
 
     # Primary Key
@@ -56,7 +59,7 @@ class Payment(Base):
         ForeignKey("bookings.id", ondelete="CASCADE"),
         unique=True,
         nullable=False,
-        index=True
+        index=True,
     )
 
     # Payment Details
@@ -66,8 +69,7 @@ class Payment(Base):
     artisan_amount = Column(DECIMAL(10, 2), nullable=False, default=0)
     currency = Column(String(3), nullable=False, default="NGN")
     payment_method = Column(
-        SQLEnum(PaymentMethod, values_callable=lambda x: [e.value for e in x]),
-        nullable=True
+        SQLEnum(PaymentMethod, values_callable=lambda x: [e.value for e in x]), nullable=True
     )
 
     # Status
@@ -75,7 +77,7 @@ class Payment(Base):
         SQLEnum(PaymentStatus, values_callable=lambda x: [e.value for e in x]),
         nullable=False,
         default=PaymentStatus.PENDING,
-        index=True
+        index=True,
     )
 
     # Paystack Response Data
@@ -109,7 +111,9 @@ class Payment(Base):
 
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
 
     # Relationships
     booking = relationship("Booking", back_populates="payment")
@@ -126,6 +130,7 @@ class PaymentReference(Base):
     Re-initialising a FAILED payment gives it a new ``payment_reference``; the old one is kept
     here so a late ``charge.success`` for it still finds the payment.
     """
+
     __tablename__ = "payment_references"
 
     id = Column(Integer, primary_key=True)

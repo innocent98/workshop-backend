@@ -3,27 +3,32 @@ File upload utilities for images (profile pictures, portfolio, etc.).
 Supports both local storage and Cloudinary.
 Implements security best practices for file handling.
 """
+
+import io
 import os
 import uuid
-import io
 from typing import Optional, Tuple
-from fastapi import UploadFile, HTTPException, status
-from PIL import Image
+
 import cloudinary
-import cloudinary.uploader
 import cloudinary.api
+import cloudinary.uploader
+from fastapi import HTTPException, UploadFile, status
+from PIL import Image
 
-from app.core.logger import logger
 from app.core.config import settings
-
+from app.core.logger import logger
 
 # Initialize Cloudinary if credentials are provided
-if settings.CLOUDINARY_CLOUD_NAME and settings.CLOUDINARY_API_KEY and settings.CLOUDINARY_API_SECRET:
+if (
+    settings.CLOUDINARY_CLOUD_NAME
+    and settings.CLOUDINARY_API_KEY
+    and settings.CLOUDINARY_API_SECRET
+):
     cloudinary.config(
         cloud_name=settings.CLOUDINARY_CLOUD_NAME,
         api_key=settings.CLOUDINARY_API_KEY,
         api_secret=settings.CLOUDINARY_API_SECRET,
-        secure=True
+        secure=True,
     )
     logger.info("Cloudinary initialized successfully")
 else:
@@ -51,18 +56,17 @@ def validate_image_file(file: UploadFile) -> None:
     if file_ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid file type. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}"
+            detail=f"Invalid file type. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}",
         )
 
     # Check content type
-    if not file.content_type or not file.content_type.startswith('image/'):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="File must be an image"
-        )
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File must be an image")
 
 
-def process_image(content: bytes, max_dimension: int = MAX_IMAGE_DIMENSION) -> Tuple[Image.Image, str]:
+def process_image(
+    content: bytes, max_dimension: int = MAX_IMAGE_DIMENSION
+) -> Tuple[Image.Image, str]:
     """
     Process and optimize image.
 
@@ -80,38 +84,38 @@ def process_image(content: bytes, max_dimension: int = MAX_IMAGE_DIMENSION) -> T
         image = Image.open(io.BytesIO(content))
 
         # Convert RGBA to RGB for JPEG compatibility
-        if image.mode in ('RGBA', 'LA', 'P'):
-            background = Image.new('RGB', image.size, (255, 255, 255))
-            if image.mode == 'P':
-                image = image.convert('RGBA')
-            background.paste(image, mask=image.split()[-1] if image.mode in ('RGBA', 'LA') else None)
+        if image.mode in ("RGBA", "LA", "P"):
+            background = Image.new("RGB", image.size, (255, 255, 255))
+            if image.mode == "P":
+                image = image.convert("RGBA")
+            background.paste(
+                image, mask=image.split()[-1] if image.mode in ("RGBA", "LA") else None
+            )
             image = background
 
         # Resize if larger than max dimensions
         if image.width > max_dimension or image.height > max_dimension:
             image.thumbnail((max_dimension, max_dimension), Image.Resampling.LANCZOS)
-            logger.info(f"Resized image from {image.width}x{image.height} to fit {max_dimension}x{max_dimension}")
+            logger.info(
+                f"Resized image from {image.width}x{image.height} to fit {max_dimension}x{max_dimension}"  # noqa: E501
+            )
 
         # Determine format
-        img_format = image.format or 'JPEG'
-        if img_format not in ['JPEG', 'PNG', 'GIF', 'WEBP']:
-            img_format = 'JPEG'
+        img_format = image.format or "JPEG"
+        if img_format not in ["JPEG", "PNG", "GIF", "WEBP"]:
+            img_format = "JPEG"
 
         return image, img_format
 
     except Exception as e:
         logger.error(f"Failed to process image: {str(e)}")
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid image file or corrupted image"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid image file or corrupted image"
         )
 
 
 async def upload_to_cloudinary(
-    image: Image.Image,
-    img_format: str,
-    folder: str,
-    public_id: Optional[str] = None
+    image: Image.Image, img_format: str, folder: str, public_id: Optional[str] = None
 ) -> str:
     """
     Upload image to Cloudinary.
@@ -149,21 +153,18 @@ async def upload_to_cloudinary(
         result = cloudinary.uploader.upload(img_byte_arr, **upload_options)
 
         logger.info(f"Image uploaded to Cloudinary: {result['secure_url']}")
-        return result['secure_url']
+        return result["secure_url"]
 
     except Exception as e:
         logger.error(f"Cloudinary upload failed: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to upload image to cloud storage"
+            detail="Failed to upload image to cloud storage",
         )
 
 
 async def save_to_local(
-    image: Image.Image,
-    img_format: str,
-    filename: str,
-    subfolder: str = "profile_pictures"
+    image: Image.Image, img_format: str, filename: str, subfolder: str = "profile_pictures"
 ) -> str:
     """
     Save image to local storage.
@@ -193,7 +194,7 @@ async def save_to_local(
         logger.error(f"Local save failed: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to save image to local storage"
+            detail="Failed to save image to local storage",
         )
 
 
@@ -227,7 +228,7 @@ async def save_profile_picture(file: UploadFile, user_id: str) -> Optional[str]:
         if len(content) > MAX_FILE_SIZE:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"File size exceeds {settings.MAX_UPLOAD_SIZE_MB}MB limit"
+                detail=f"File size exceeds {settings.MAX_UPLOAD_SIZE_MB}MB limit",
             )
 
         # Process image
@@ -278,7 +279,7 @@ async def save_portfolio_image(file: UploadFile, artisan_id: str) -> Optional[st
         if len(content) > max_portfolio_size:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"File size exceeds 10MB limit for portfolio images"
+                detail="File size exceeds 10MB limit for portfolio images",
             )
 
         # Process image (larger dimensions for portfolio)
@@ -330,7 +331,7 @@ async def save_booking_progress_image(
         if len(content) > max_progress_size:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="File size exceeds 10MB limit for progress images"
+                detail="File size exceeds 10MB limit for progress images",
             )
 
         image, img_format = process_image(content, max_dimension=1920)
@@ -369,21 +370,21 @@ async def delete_image(image_url: str) -> bool:
         # Check if it's a Cloudinary URL
         if "cloudinary.com" in image_url:
             # Extract public_id from URL
-            # Format: https://res.cloudinary.com/{cloud_name}/image/upload/{transformations}/{public_id}.{format}
+            # Format: https://res.cloudinary.com/{cloud_name}/image/upload/{transformations}/{public_id}.{format}  # noqa: E501
             parts = image_url.split("/")
             if "upload" in parts:
                 upload_index = parts.index("upload")
                 # Get everything after 'upload', join and remove extension
-                public_id_parts = parts[upload_index + 1:]
+                public_id_parts = parts[upload_index + 1 :]
                 # Skip transformation parameters (v{number})
-                public_id_parts = [p for p in public_id_parts if not p.startswith('v')]
-                public_id = '/'.join(public_id_parts)
+                public_id_parts = [p for p in public_id_parts if not p.startswith("v")]
+                public_id = "/".join(public_id_parts)
                 # Remove extension
                 public_id = os.path.splitext(public_id)[0]
 
                 # Delete from Cloudinary
                 result = cloudinary.uploader.destroy(public_id)
-                success = result.get('result') == 'ok'
+                success = result.get("result") == "ok"
                 logger.info(f"Deleted image from Cloudinary: {public_id}, success: {success}")
                 return success
 

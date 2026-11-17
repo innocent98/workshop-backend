@@ -1,6 +1,7 @@
-from typing import List, Optional, Any, Dict
 from decimal import Decimal
-from pydantic import AnyHttpUrl, field_validator, EmailStr
+from typing import List, Optional
+
+from pydantic import EmailStr, field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -24,7 +25,7 @@ class Settings(BaseSettings):
     BACKEND_CORS_ORIGINS: List[str] = [
         "http://localhost:3000",
         "http://localhost:8000",
-        "https://workchop.luranai.com"
+        "https://workchop.luranai.com",
     ]
 
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
@@ -87,7 +88,9 @@ class Settings(BaseSettings):
 
     # Push notifications (Firebase Cloud Messaging)
     FCM_ENABLED: bool = True
-    FCM_SERVICE_ACCOUNT_FILE: Optional[str] = "/app/app/service_account/workchop-b3069-firebase-adminsdk-fbsvc-75e0bff73a.json"
+    FCM_SERVICE_ACCOUNT_FILE: Optional[str] = (
+        "/app/app/service_account/workchop-b3069-firebase-adminsdk-fbsvc-75e0bff73a.json"
+    )
 
     # Admin
     FIRST_SUPERUSER_EMAIL: EmailStr

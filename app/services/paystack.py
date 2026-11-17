@@ -1,14 +1,16 @@
-import hmac
 import hashlib
-import requests
-from typing import Dict, Optional
+import hmac
 from decimal import Decimal
+from typing import Dict, Optional
+
+import requests
 
 from app.core.config import settings
 
 
 class PaystackError(Exception):
     """Custom exception for Paystack API errors"""
+
     def __init__(self, message: str, status_code: Optional[int] = None):
         super().__init__(message)
         self.message = message
@@ -45,7 +47,7 @@ class PaystackService:
         """Get authorization headers for Paystack API requests"""
         return {
             "Authorization": f"Bearer {PaystackService.SECRET_KEY}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
 
     @staticmethod
@@ -65,7 +67,7 @@ class PaystackService:
         amount: Decimal,
         reference: str,
         metadata: Optional[Dict] = None,
-        callback_url: Optional[str] = None
+        callback_url: Optional[str] = None,
     ) -> Dict:
         """
         Initialize a payment transaction with Paystack.
@@ -98,12 +100,7 @@ class PaystackService:
             payload["callback_url"] = callback_url
 
         try:
-            response = requests.post(
-                url,
-                json=payload,
-                headers=cls._get_headers(),
-                timeout=30
-            )
+            response = requests.post(url, json=payload, headers=cls._get_headers(), timeout=30)
         except requests.RequestException as e:
             raise PaystackError(f"Paystack API request failed: {str(e)}")
 
@@ -150,11 +147,7 @@ class PaystackService:
         url = f"{cls.BASE_URL}/transaction/verify/{reference}"
 
         try:
-            response = requests.get(
-                url,
-                headers=cls._get_headers(),
-                timeout=30
-            )
+            response = requests.get(url, headers=cls._get_headers(), timeout=30)
             response.raise_for_status()
             data = response.json()
 
@@ -182,20 +175,13 @@ class PaystackService:
             return False
 
         computed_signature = hmac.new(
-            settings.PAYSTACK_WEBHOOK_SECRET.encode('utf-8'),
-            payload,
-            hashlib.sha512
+            settings.PAYSTACK_WEBHOOK_SECRET.encode("utf-8"), payload, hashlib.sha512
         ).hexdigest()
 
         return hmac.compare_digest(computed_signature, signature)
 
     @classmethod
-    def create_transfer_recipient(
-        cls,
-        name: str,
-        account_number: str,
-        bank_code: str
-    ) -> Dict:
+    def create_transfer_recipient(cls, name: str, account_number: str, bank_code: str) -> Dict:
         """
         Create a transfer recipient (artisan's bank account).
 
@@ -217,16 +203,11 @@ class PaystackService:
             "name": name,
             "account_number": account_number,
             "bank_code": bank_code,
-            "currency": "NGN"
+            "currency": "NGN",
         }
 
         try:
-            response = requests.post(
-                url,
-                json=payload,
-                headers=cls._get_headers(),
-                timeout=30
-            )
+            response = requests.post(url, json=payload, headers=cls._get_headers(), timeout=30)
             _raise_for_http_error(response, "Recipient creation failed")
             data = response.json()
 
@@ -240,11 +221,7 @@ class PaystackService:
 
     @classmethod
     def initiate_transfer(
-        cls,
-        recipient_code: str,
-        amount: Decimal,
-        reason: str,
-        reference: str
+        cls, recipient_code: str, amount: Decimal, reason: str, reference: str
     ) -> Dict:
         """
         Transfer funds to artisan.
@@ -268,16 +245,11 @@ class PaystackService:
             "amount": cls._naira_to_kobo(amount),
             "recipient": recipient_code,
             "reason": reason,
-            "reference": reference
+            "reference": reference,
         }
 
         try:
-            response = requests.post(
-                url,
-                json=payload,
-                headers=cls._get_headers(),
-                timeout=30
-            )
+            response = requests.post(url, json=payload, headers=cls._get_headers(), timeout=30)
             _raise_for_http_error(response, "Transfer initiation failed")
             data = response.json()
 
@@ -329,11 +301,7 @@ class PaystackService:
         url = f"{cls.BASE_URL}/bank"
 
         try:
-            response = requests.get(
-                url,
-                headers=cls._get_headers(),
-                timeout=30
-            )
+            response = requests.get(url, headers=cls._get_headers(), timeout=30)
             response.raise_for_status()
             data = response.json()
 
@@ -346,11 +314,7 @@ class PaystackService:
             raise PaystackError(f"Paystack API request failed: {str(e)}")
 
     @classmethod
-    def verify_account_number(
-        cls,
-        account_number: str,
-        bank_code: str
-    ) -> Dict:
+    def verify_account_number(cls, account_number: str, bank_code: str) -> Dict:
         """
         Verify bank account number.
 
@@ -366,18 +330,10 @@ class PaystackService:
         """
         url = f"{cls.BASE_URL}/bank/resolve"
 
-        params = {
-            "account_number": account_number,
-            "bank_code": bank_code
-        }
+        params = {"account_number": account_number, "bank_code": bank_code}
 
         try:
-            response = requests.get(
-                url,
-                params=params,
-                headers=cls._get_headers(),
-                timeout=30
-            )
+            response = requests.get(url, params=params, headers=cls._get_headers(), timeout=30)
             data = response.json()
 
             if response.status_code >= 400:

@@ -1,28 +1,24 @@
 """
 Email-related background tasks using Celery.
 """
+
 from datetime import datetime, timezone
-from typing import Dict, Any
-from celery import shared_task
+from typing import Any, Dict
+
 from sqlalchemy.orm import Session
 
 from app.celery_app import celery_app
 from app.core.logger import logger
-from app.db.session import SessionLocal
 from app.db.models.otp import OTP
-from app.utils.email import (
-    send_otp_email as sync_send_otp_email,
-    send_password_reset_email as sync_send_password_reset_email,
-    send_welcome_email as sync_send_welcome_email,
-)
+from app.db.session import SessionLocal
+from app.utils.email import send_otp_email as sync_send_otp_email
+from app.utils.email import send_password_reset_email as sync_send_password_reset_email
+from app.utils.email import send_welcome_email as sync_send_welcome_email
 
 
 @celery_app.task(name="app.tasks.email_tasks.send_otp_email", bind=True, max_retries=3)
 def send_otp_email(
-    self,
-    email: str,
-    otp_code: str,
-    purpose: str = "verification"
+    self, email: str, otp_code: str, purpose: str = "verification"
 ) -> Dict[str, Any]:
     """
     Send OTP email asynchronously.
@@ -49,15 +45,11 @@ def send_otp_email(
     except Exception as exc:
         logger.error(f"Error sending OTP email to {email}: {str(exc)}")
         # Retry with exponential backoff: 60s, 120s, 180s
-        raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
+        raise self.retry(exc=exc, countdown=60 * (2**self.request.retries))
 
 
 @celery_app.task(name="app.tasks.email_tasks.send_password_reset_email", bind=True, max_retries=3)
-def send_password_reset_email(
-    self,
-    email: str,
-    reset_token: str
-) -> Dict[str, Any]:
+def send_password_reset_email(self, email: str, reset_token: str) -> Dict[str, Any]:
     """
     Send password reset email asynchronously.
 
@@ -81,15 +73,11 @@ def send_password_reset_email(
 
     except Exception as exc:
         logger.error(f"Error sending password reset email to {email}: {str(exc)}")
-        raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
+        raise self.retry(exc=exc, countdown=60 * (2**self.request.retries))
 
 
 @celery_app.task(name="app.tasks.email_tasks.send_welcome_email", bind=True, max_retries=3)
-def send_welcome_email(
-    self,
-    email: str,
-    full_name: str
-) -> Dict[str, Any]:
+def send_welcome_email(self, email: str, full_name: str) -> Dict[str, Any]:
     """
     Send welcome email asynchronously.
 
@@ -113,7 +101,7 @@ def send_welcome_email(
 
     except Exception as exc:
         logger.error(f"Error sending welcome email to {email}: {str(exc)}")
-        raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
+        raise self.retry(exc=exc, countdown=60 * (2**self.request.retries))
 
 
 @celery_app.task(name="app.tasks.email_tasks.cleanup_expired_otps")
