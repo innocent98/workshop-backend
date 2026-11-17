@@ -68,7 +68,10 @@ def find_payment_by_reference(db: Session, reference: str, lock: bool = False) -
 
     def _query(*criteria):
         q = db.query(Payment).filter(*criteria)
-        return q.with_for_update() if lock else q
+        # FOR UPDATE alone does not refresh an instance the session already holds (an earlier
+        # unlocked read, e.g. /payments/verify or the probe in apply_charge_success): without
+        # populate_existing the status checks after the lock would use stale data.
+        return q.with_for_update().populate_existing() if lock else q
 
     payment = _query(Payment.payment_reference == reference).first()
     if payment is None:
@@ -118,7 +121,13 @@ def apply_charge_success(db: Session, reference: str, data: dict) -> ChargeResul
     probe = find_payment_by_reference(db, reference)
     if probe is None:
         return ChargeResult(OUTCOME_NOT_FOUND)
-    booking = db.query(Booking).filter(Booking.id == probe.booking_id).with_for_update().first()
+    booking = (
+        db.query(Booking)
+        .filter(Booking.id == probe.booking_id)
+        .with_for_update()
+        .populate_existing()  # the session may hold a stale copy (see find_payment_by_reference)
+        .first()
+    )
     payment = _lock_payment(db, reference)
     if payment is None:  # pragma: no cover - payments are never deleted
         db.rollback()
@@ -159,11 +168,13 @@ def apply_charge_success(db: Session, reference: str, data: dict) -> ChargeResul
     # Read AFTER the booking lock: an account deletion in flight holds that lock, so this sees its
     # committed result. Money for a deleted customer is not kept silently: an admin refunds it.
     customer = (
-        db.query(User.is_active).filter(User.id == booking.customer_id).first()
+        db.query(User.is_active, User.deleted_at).filter(User.id == booking.customer_id).first()
         if booking is not None
         else None
     )
-    customer_gone = customer is not None and not customer[0]
+    customer_gone = customer is not None and (
+        not customer.is_active or customer.deleted_at is not None
+    )
 
     booking_moved = False
     if customer_gone:

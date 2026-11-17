@@ -289,3 +289,60 @@ def test_charge_success_locks_the_booking_before_the_payment(db):
         holder.close()
     assert not worker.is_alive()
     assert outcome["result"] == svc.OUTCOME_PROCESSED
+
+
+def _settle_between_probe_and_lock(monkeypatch, ref, data):
+    """Make a second transaction settle + commit right after the unlocked probe read, i.e. after
+    the first caller loaded the payment but before it takes the row locks (webhook vs verify)."""
+    from tests.conftest import TestingSessionLocal
+
+    real = svc.find_payment_by_reference
+    state = {"done": False}
+
+    def wrapper(db, reference, lock=False):
+        found = real(db, reference, lock=lock)
+        if not lock and not state["done"]:
+            state["done"] = True
+            other = TestingSessionLocal()
+            try:
+                assert svc.apply_charge_success(other, ref, data).outcome == svc.OUTCOME_PROCESSED
+            finally:
+                other.close()
+        return found
+
+    monkeypatch.setattr(svc, "find_payment_by_reference", wrapper)
+
+
+def test_settlement_committed_between_probe_and_lock_is_seen_as_already_settled(
+    db, notifications, monkeypatch
+):
+    """The lock must re-read the row: a stale PENDING from the probe would settle twice."""
+    _, booking, payment = _setup(db)
+    ref = payment.payment_reference
+    data = _charge(payment)
+    _settle_between_probe_and_lock(monkeypatch, ref, data)
+
+    result = svc.apply_charge_success(db, ref, data)  # same session as the probe
+
+    assert result.outcome == svc.OUTCOME_ALREADY
+    db.refresh(payment), db.refresh(booking)
+    assert payment.status == PaymentStatus.SUCCESS
+    assert payment.needs_refund is False
+    assert len(notifications) == 1  # settled once, notified once
+
+
+def test_second_checkout_settled_between_probe_and_lock_is_flagged_duplicate(
+    db, notifications, monkeypatch
+):
+    """Two different references charged at the same time: the loser must set needs_refund and
+    must not overwrite the winner's paystack_reference."""
+    _, booking, payment = _setup(db)
+    ref = payment.payment_reference
+    _settle_between_probe_and_lock(monkeypatch, ref, _charge(payment, reference="PAY-WINNER"))
+
+    result = svc.apply_charge_success(db, ref, _charge(payment, reference="PAY-LOSER"))
+
+    assert result.outcome == svc.OUTCOME_ALREADY
+    db.refresh(payment)
+    assert payment.paystack_reference == "PAY-WINNER"
+    assert payment.needs_refund is True

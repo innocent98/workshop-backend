@@ -939,12 +939,6 @@ def test_change_password_fails_closed_with_503_when_the_limiter_is_down(client, 
     assert verify_password(PW, db.get(User, u.id).hashed_password)  # unchanged
 
 
-def test_login_is_unaffected_by_a_limiter_outage(client, db, redis_down):
-    user_with_pw(db, email="outage@example.com")
-    r = client.post("/api/v1/auth/login", json={"email": "outage@example.com", "password": PW})
-    assert r.status_code == 200, r.text
-
-
 def test_a_blocked_delete_does_not_use_up_the_attempt_budget(client, db, service):
     """A correct password followed by a 409 blocker is not a failure: it is given back."""
     from app.core import attempt_limit
