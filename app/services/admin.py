@@ -415,6 +415,7 @@ def handle_refund_event(db: Session, event: str, data: dict) -> Optional[str]:
 
     if record.refund_status == "processed":
         return record.refund_status  # final: nothing can move it
+    observed_status = record.refund_status
     if new == "failed" and not _failed_event_is_confirmed(record, data, str(tx)):
         db.rollback()
         return record.refund_status
@@ -423,6 +424,15 @@ def handle_refund_event(db: Session, event: str, data: dict) -> Optional[str]:
     db.refresh(record)
     current = record.refund_status
     if current == "processed" or (current == "failed" and new != "failed"):
+        db.rollback()
+        return current
+    if new == "failed" and (
+        current != observed_status
+        or current not in ("pending", "processing", "needs-attention")
+        or _names_other_refund(record, data)
+    ):
+        # Re-checked UNDER the lock: a retry started (status 'requested', a refund call in flight)
+        # or the record moved on since Paystack was consulted, so this event is stale.
         db.rollback()
         return current
     if new == "failed":
@@ -449,6 +459,15 @@ def handle_refund_event(db: Session, event: str, data: dict) -> Optional[str]:
     result = record.refund_status
     db.commit()
     return result
+
+
+def _names_other_refund(record: DisputeResolution, data: dict) -> bool:
+    event_id = data.get("id")
+    return bool(
+        record.refund_reference
+        and event_id is not None
+        and str(event_id) != record.refund_reference
+    )
 
 
 def _failed_event_is_confirmed(record: DisputeResolution, data: dict, tx: str) -> bool:

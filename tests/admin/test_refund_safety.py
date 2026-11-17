@@ -306,6 +306,20 @@ def test_stale_failed_event_for_an_earlier_refund_cannot_reopen_a_live_retry(
     assert resolve(client, admin_h, disputed.id, "release_to_artisan").status_code == 409
 
 
+def test_failed_event_is_ignored_while_a_retry_is_in_flight(client, db, admin_h, disputed, ps):
+    """status 'requested' = a refund call is in flight (or its outcome unknown): a failed event
+    must not reopen the dispute, even if Paystack's list says nothing live exists yet."""
+    ps.refunds = [TIMEOUT]
+    ps.lists = [[]]
+    assert resolve(client, admin_h, disputed.id).status_code == 502  # stays 'requested'
+    ref = db.query(Payment).one().paystack_reference
+    ps.lists = [[]]  # "nothing live" at check time
+    out = handle_refund_event(db, "refund.failed", {"transaction_reference": ref})
+    assert out == "requested"
+    assert states(db, disputed.id) == (BookingStatus.DISPUTED, PaymentStatus.SUCCESS, "requested")
+    assert resolve(client, admin_h, disputed.id, "release_to_artisan").status_code == 409
+
+
 def test_failed_event_is_ignored_when_paystack_lists_a_live_refund(
     client, db, admin_h, disputed, ps
 ):
