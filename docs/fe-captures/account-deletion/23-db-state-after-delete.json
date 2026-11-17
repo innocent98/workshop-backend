@@ -1,0 +1,37 @@
+{
+  "note": "direct DB read after the delete (not an API response)",
+  "state": {
+    "user": {
+      "full_name": "Deleted User",
+      "email": "deleted+4981d9d1bd7742cfa074684087d03b26@deleted.invalid",
+      "phone_number": "del_4981d9d1bd77",
+      "hashed_password": null,
+      "bio": null,
+      "location_address": null,
+      "is_active": false,
+      "deleted_at_set": true
+    },
+    "bookings_kept": [
+      [
+        "BKG-DEMO02",
+        "cancelled",
+        "8000.00"
+      ],
+      [
+        "BKG-DEMO03",
+        "completed",
+        "8000.00"
+      ]
+    ],
+    "payments_kept": [
+      [
+        "PAY-DEMO03",
+        "released",
+        "8000.00",
+        "Deleted User",
+        "deleted+4981d9d1bd7742cfa074684087d03b26@deleted.invalid"
+      ]
+    ],
+    "push_devices": 0
+  }
+}

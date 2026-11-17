@@ -1,0 +1,14 @@
+{
+  "request": {
+    "method": "DELETE",
+    "path": "/auth/me",
+    "body": {
+      "password": "Placeholder-pw-1"
+    }
+  },
+  "status": 401,
+  "response": {
+    "detail": "Token has been revoked. Please login again."
+  },
+  "note": "the token was revoked by the first delete"
+}

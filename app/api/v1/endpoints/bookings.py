@@ -58,6 +58,27 @@ def _notify_user(user_id, title: str, body: str, data: Optional[dict] = None) ->
         pass
 
 
+def _load_booking_locked(db: Session, booking_id: int) -> Optional[Booking]:
+    """Load a booking FOR UPDATE: state-changing endpoints serialise with each other and with
+    account deletion (which closes pending bookings), and re-check the status on fresh data
+    instead of writing back a status computed from a stale read."""
+    return db.query(Booking).filter(Booking.id == booking_id).with_for_update().first()
+
+
+def _ensure_counterparty_active(db: Session, booking: Booking, current_user: User) -> None:
+    """Refuse to act on a booking whose other party is deleted/deactivated."""
+    other_id = booking.customer_id if current_user.id == booking.artisan_id else booking.artisan_id
+    other = db.query(User).filter(User.id == other_id).first()
+    if other is None or not other.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "account_unavailable",
+                "message": "The other party's account is no longer available.",
+            },
+        )
+
+
 def _ensure_pending_booking(booking: Booking, action: str) -> None:
     if booking.status != BookingStatus.PENDING:
         raise HTTPException(
@@ -207,7 +228,9 @@ async def create_booking(
             status_code=status.HTTP_403_FORBIDDEN, detail="Only customers can create bookings"
         )
 
-    # Verify artisan exists and is active
+    # Verify artisan exists and is active. FOR SHARE: account deletion takes FOR UPDATE on the user
+    # row, so a booking can no longer be inserted for an artisan whose deletion is in flight (the
+    # deletion would otherwise miss it), and a committed deletion is seen as inactive.
     artisan = (
         db.query(User)
         .filter(
@@ -215,6 +238,7 @@ async def create_booking(
             User.user_type == UserType.ARTISAN,
             User.is_active == True,
         )
+        .with_for_update(read=True)
         .first()
     )
     if not artisan:
@@ -426,7 +450,7 @@ async def get_booking(
 
 
 @router.patch("/{booking_id}/negotiate", response_model=BookingResponse)
-async def negotiate_booking(
+def negotiate_booking(
     booking_id: int,
     request: NegotiateBookingRequest,
     current_user: User = Depends(get_current_user),
@@ -445,7 +469,7 @@ async def negotiate_booking(
             detail="Only artisans can negotiate booking price",
         )
 
-    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    booking = _load_booking_locked(db, booking_id)
     if not booking:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
 
@@ -453,6 +477,8 @@ async def negotiate_booking(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="You are not assigned to this booking"
         )
+
+    _ensure_counterparty_active(db, booking, current_user)
 
     _ensure_pending_booking(booking, "negotiate")
 
@@ -508,7 +534,7 @@ async def negotiate_booking(
 
 
 @router.patch("/{booking_id}/negotiate/respond", response_model=BookingResponse)
-async def respond_to_negotiation(
+def respond_to_negotiation(
     booking_id: int,
     request: NegotiateResponseRequest,
     current_user: User = Depends(get_current_user),
@@ -528,7 +554,7 @@ async def respond_to_negotiation(
             detail="Only customers can respond to negotiation",
         )
 
-    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    booking = _load_booking_locked(db, booking_id)
     if not booking:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
 
@@ -536,6 +562,8 @@ async def respond_to_negotiation(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="You don't own this booking"
         )
+
+    _ensure_counterparty_active(db, booking, current_user)
 
     _ensure_pending_booking(booking, "respond to negotiation")
 
@@ -639,7 +667,7 @@ async def respond_to_negotiation(
 
 
 @router.patch("/{booking_id}/accept", response_model=BookingResponse)
-async def accept_booking(
+def accept_booking(
     booking_id: int,
     request: AcceptBookingRequest,
     current_user: User = Depends(get_current_user),
@@ -656,7 +684,7 @@ async def accept_booking(
             status_code=status.HTTP_403_FORBIDDEN, detail="Only artisans can accept bookings"
         )
 
-    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    booking = _load_booking_locked(db, booking_id)
     if not booking:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
 
@@ -665,6 +693,8 @@ async def accept_booking(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="You are not assigned to this booking"
         )
+
+    _ensure_counterparty_active(db, booking, current_user)
 
     _ensure_pending_booking(booking, "accept")
 
@@ -708,7 +738,7 @@ async def accept_booking(
 
 
 @router.patch("/{booking_id}/reject", response_model=BookingResponse)
-async def reject_booking(
+def reject_booking(
     booking_id: int,
     request: RejectBookingRequest,
     current_user: User = Depends(get_current_user),
@@ -725,7 +755,7 @@ async def reject_booking(
             status_code=status.HTTP_403_FORBIDDEN, detail="Only artisans can reject bookings"
         )
 
-    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    booking = _load_booking_locked(db, booking_id)
     if not booking:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
 
@@ -760,7 +790,7 @@ async def reject_booking(
 
 
 @router.patch("/{booking_id}/start", response_model=BookingResponse)
-async def start_booking(
+def start_booking(
     booking_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ):
     """
@@ -774,7 +804,7 @@ async def start_booking(
             status_code=status.HTTP_403_FORBIDDEN, detail="Only artisans can start bookings"
         )
 
-    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    booking = _load_booking_locked(db, booking_id)
     if not booking:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
 
@@ -783,6 +813,8 @@ async def start_booking(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="You are not assigned to this booking"
         )
+
+    _ensure_counterparty_active(db, booking, current_user)
 
     # Check if booking is in PAID status
     if booking.status != BookingStatus.PAID:
@@ -855,6 +887,8 @@ async def create_booking_progress_log(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You are not assigned to this booking",
         )
+
+    _ensure_counterparty_active(db, booking, current_user)
 
     if booking.status not in [BookingStatus.PAID, BookingStatus.IN_PROGRESS]:
         raise HTTPException(
@@ -932,7 +966,7 @@ async def list_booking_progress_logs(
 
 
 @router.patch("/{booking_id}/complete", response_model=BookingResponse)
-async def complete_booking(
+def complete_booking(
     booking_id: int,
     request: CompleteBookingRequest,
     current_user: User = Depends(get_current_user),
@@ -949,7 +983,7 @@ async def complete_booking(
             status_code=status.HTTP_403_FORBIDDEN, detail="Only artisans can complete bookings"
         )
 
-    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    booking = _load_booking_locked(db, booking_id)
     if not booking:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
 
@@ -958,6 +992,8 @@ async def complete_booking(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="You are not assigned to this booking"
         )
+
+    _ensure_counterparty_active(db, booking, current_user)
 
     # Check if booking is in IN_PROGRESS status
     if booking.status != BookingStatus.IN_PROGRESS:
@@ -1009,7 +1045,7 @@ async def complete_booking(
 
 
 @router.patch("/{booking_id}/confirm-completion", response_model=BookingResponse)
-async def confirm_booking_completion(
+def confirm_booking_completion(
     booking_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ):
     """
@@ -1022,7 +1058,7 @@ async def confirm_booking_completion(
             status_code=status.HTTP_403_FORBIDDEN, detail="Only customers can confirm completion"
         )
 
-    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    booking = _load_booking_locked(db, booking_id)
     if not booking:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
 
@@ -1030,6 +1066,8 @@ async def confirm_booking_completion(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="You don't own this booking"
         )
+
+    _ensure_counterparty_active(db, booking, current_user)
 
     if booking.status != BookingStatus.COMPLETED:
         raise HTTPException(
@@ -1056,7 +1094,7 @@ async def confirm_booking_completion(
 
 
 @router.patch("/{booking_id}/dispute-completion", response_model=BookingResponse)
-async def dispute_booking_completion(
+def dispute_booking_completion(
     booking_id: int,
     request: DisputeCompletionRequest,
     current_user: User = Depends(get_current_user),
@@ -1072,7 +1110,7 @@ async def dispute_booking_completion(
             status_code=status.HTTP_403_FORBIDDEN, detail="Only customers can dispute completion"
         )
 
-    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    booking = _load_booking_locked(db, booking_id)
     if not booking:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
 
@@ -1080,6 +1118,8 @@ async def dispute_booking_completion(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="You don't own this booking"
         )
+
+    _ensure_counterparty_active(db, booking, current_user)
 
     if booking.status != BookingStatus.COMPLETED:
         raise HTTPException(
@@ -1111,7 +1151,7 @@ async def dispute_booking_completion(
 
 
 @router.patch("/{booking_id}/cancel", response_model=BookingResponse)
-async def cancel_booking(
+def cancel_booking(
     booking_id: int,
     request: CancelBookingRequest,
     current_user: User = Depends(get_current_user),
@@ -1128,7 +1168,7 @@ async def cancel_booking(
             status_code=status.HTTP_403_FORBIDDEN, detail="Only customers can cancel bookings"
         )
 
-    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    booking = _load_booking_locked(db, booking_id)
     if not booking:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
 

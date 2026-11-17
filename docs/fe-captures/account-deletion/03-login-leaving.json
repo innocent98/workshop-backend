@@ -1,0 +1,25 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+      "email": "leaving@example.com",
+      "password": "<placeholder>"
+    }
+  },
+  "status": 200,
+  "response": {
+    "success": true,
+    "message": "Login successful",
+    "token": "<jwt redacted>",
+    "user": {
+      "id": "4981d9d1-bd77-42cf-a074-684087d03b26",
+      "full_name": "Leaving Customer",
+      "email": "leaving@example.com",
+      "phone_number": "+2348000000004",
+      "user_type": "client",
+      "profile_picture_url": null,
+      "bio": "About me"
+    }
+  }
+}

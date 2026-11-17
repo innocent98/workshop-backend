@@ -1,0 +1,12 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/profiles/customers/me",
+    "body": null
+  },
+  "status": 401,
+  "response": {
+    "detail": "Token has been revoked. Please login again."
+  },
+  "note": "same (revoked) token"
+}

@@ -1,0 +1,25 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+      "email": "blocked@example.com",
+      "password": "<placeholder>"
+    }
+  },
+  "status": 200,
+  "response": {
+    "success": true,
+    "message": "Login successful",
+    "token": "<jwt redacted>",
+    "user": {
+      "id": "546bcb78-76ba-457b-a919-bf74a7f89db6",
+      "full_name": "Blocked Customer",
+      "email": "blocked@example.com",
+      "phone_number": "+2348000000003",
+      "user_type": "client",
+      "profile_picture_url": null,
+      "bio": null
+    }
+  }
+}

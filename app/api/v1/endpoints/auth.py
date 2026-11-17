@@ -3,18 +3,32 @@ Authentication endpoints.
 Implements all 13 authentication endpoints from API documentation.
 """
 
+from datetime import datetime, timezone
 from typing import Optional
 
 import firebase_admin
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Body,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    UploadFile,
+    status,
+)
 from firebase_admin import auth as firebase_auth
 from firebase_admin import credentials
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
+from app.core import attempt_limit
 from app.core.config import settings
 from app.core.logger import log
 from app.core.rate_limit import limiter
+from app.core.security import verify_password
 from app.core.token_blacklist import blacklist_token
 from app.db.models.service import Service, UserService
 from app.db.models.user import User
@@ -23,6 +37,8 @@ from app.schemas.auth import (
     ChangePasswordRequest,
     ChangePasswordResponse,
     CompleteProfileResponse,
+    DeleteAccountRequest,
+    DeleteAccountResponse,
     ForgotPasswordResetRequest,
     ForgotPasswordResetResponse,
     ForgotPasswordSendCodeRequest,
@@ -50,9 +66,14 @@ from app.schemas.auth import (
     VerifyOTPRequest,
     VerifyOTPResponse,
 )
+from app.services.account_deletion import DeletionBlocked, delete_account
 from app.services.auth import AuthService
+from app.services.notify import notify_user
+from app.utils.file_upload import delete_image
 
 router = APIRouter()
+
+CHANGE_PASSWORD_SCOPE = "change_password"
 
 
 # ============================================================================
@@ -256,6 +277,27 @@ def login(
     )
 
 
+def verify_google_claims(google_token: str) -> dict:
+    """Verify a Firebase ID token and return its claims (raises HTTPException on failure)."""
+    if not settings.FCM_SERVICE_ACCOUNT_FILE:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Firebase service account is not configured",
+        )
+
+    try:
+        if not firebase_admin._apps:
+            cred = credentials.Certificate(settings.FCM_SERVICE_ACCOUNT_FILE)
+            firebase_admin.initialize_app(cred)
+
+        return firebase_auth.verify_id_token(google_token)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid Google token",
+        )
+
+
 @router.post(
     "/google",
     response_model=GoogleSignInResponse,
@@ -269,23 +311,7 @@ def google_sign_in(
     Sign in with Google OAuth.
     Creates new user if doesn't exist, otherwise logs in.
     """
-    if not settings.FCM_SERVICE_ACCOUNT_FILE:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Firebase service account is not configured",
-        )
-
-    try:
-        if not firebase_admin._apps:
-            cred = credentials.Certificate(settings.FCM_SERVICE_ACCOUNT_FILE)
-            firebase_admin.initialize_app(cred)
-
-        claims = firebase_auth.verify_id_token(request.google_token)
-    except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid Google token",
-        )
+    claims = verify_google_claims(request.google_token)
 
     google_id = claims.get("uid")
     email = claims.get("email")
@@ -446,17 +472,151 @@ def change_password(
 ):
     """
     Change password for authenticated user.
+
+    Wrong current passwords are counted per USER (5 per 15 minutes, then 429 ``too_many_attempts``)
+    so a stolen token cannot be used to guess the password here.
     """
-    AuthService.change_password(
-        db=db,
-        user=current_user,
-        current_password=body.current_password,
-        new_password=body.new_password,
-    )
+    if attempt_limit.is_locked(CHANGE_PASSWORD_SCOPE, str(current_user.id)):
+        raise _deletion_error(
+            "too_many_attempts",
+            "Too many incorrect attempts. Please try again in a few minutes.",
+            status.HTTP_429_TOO_MANY_REQUESTS,
+        )
+    try:
+        AuthService.change_password(
+            db=db,
+            user=current_user,
+            current_password=body.current_password,
+            new_password=body.new_password,
+        )
+    except HTTPException as exc:
+        if exc.detail == "Current password is incorrect":
+            attempt_limit.register_failure(CHANGE_PASSWORD_SCOPE, str(current_user.id))
+        raise
+    attempt_limit.clear(CHANGE_PASSWORD_SCOPE, str(current_user.id))
 
     return ChangePasswordResponse(
         message="Password changed successfully",
     )
+
+
+# ============================================================================
+# ACCOUNT DELETION
+# ============================================================================
+
+DELETE_SCOPE = "account_delete"
+REAUTH_MAX_AGE_SECONDS = 300  # a Google re-auth must come from a sign-in in the last 5 minutes
+
+
+def _deletion_error(code: str, message: str, http_status: int, **extra) -> HTTPException:
+    return HTTPException(
+        status_code=http_status, detail={"code": code, "message": message, **extra}
+    )
+
+
+def _reauthenticate_for_deletion(user: User, body: DeleteAccountRequest) -> None:
+    """Re-authenticate; wrong credentials are also counted per USER (5 per 15 min)."""
+    if attempt_limit.is_locked(DELETE_SCOPE, str(user.id)):
+        raise _deletion_error(
+            "too_many_attempts",
+            "Too many incorrect attempts. Please try again in a few minutes.",
+            status.HTTP_429_TOO_MANY_REQUESTS,
+        )
+    try:
+        _check_deletion_credentials(user, body)
+    except HTTPException as exc:
+        if isinstance(exc.detail, dict) and exc.detail.get("code") in (
+            "invalid_password",
+            "invalid_reauth",
+        ):
+            attempt_limit.register_failure(DELETE_SCOPE, str(user.id))
+        raise
+
+
+def _check_deletion_credentials(user: User, body: DeleteAccountRequest) -> None:
+    if user.hashed_password:
+        if not body.password:
+            raise _deletion_error(
+                "password_required", "Enter your password to delete your account.", 400
+            )
+        if not verify_password(body.password, user.hashed_password):
+            raise _deletion_error("invalid_password", "The password is incorrect.", 403)
+        return
+
+    # Google-only account: needs a FRESH Firebase ID token for the same Google user.
+    if not body.google_token:
+        raise _deletion_error(
+            "reauth_required", "Sign in with Google again to delete your account.", 400
+        )
+    try:
+        claims = verify_google_claims(body.google_token)
+    except Exception:  # any verification failure is "not re-authenticated", never a 500
+        raise _deletion_error("invalid_reauth", "The Google sign-in could not be verified.", 403)
+    if not user.google_id or claims.get("uid") != user.google_id:
+        raise _deletion_error(
+            "invalid_reauth", "That Google account does not match this account.", 403
+        )
+    auth_time = claims.get("auth_time")
+    if not isinstance(auth_time, (int, float)) or (
+        datetime.now(timezone.utc).timestamp() - auth_time > REAUTH_MAX_AGE_SECONDS
+    ):
+        raise _deletion_error(
+            "reauth_required", "Sign in with Google again to delete your account.", 403
+        )
+
+
+@router.delete(
+    "/me",
+    response_model=DeleteAccountResponse,
+    summary="Delete my account",
+)
+@limiter.limit("10/15minutes")
+def delete_my_account(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    body: DeleteAccountRequest = Body(default_factory=DeleteAccountRequest),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Delete the authenticated user's account (soft delete + anonymise; financial records are kept).
+
+    Re-authentication: ``password`` for accounts with a password, otherwise a fresh Google
+    (Firebase) ``google_token`` for the same Google user. Refused with 409 while there are
+    accepted/paid/in-progress/disputed bookings, an unfinished withdrawal, or earnings not yet
+    withdrawn. Admin accounts cannot be self-deleted.
+    """
+    _reauthenticate_for_deletion(current_user, body)
+    if current_user.is_admin:
+        raise _deletion_error(
+            "admin_account", "Admin accounts cannot be deleted from the app.", 409
+        )
+
+    # Lock the user row so a concurrent request cannot race the checks below.
+    user = db.query(User).filter(User.id == current_user.id).with_for_update().one()
+    # Revoke the presented token explicitly; every other token dies because the account is inactive.
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header.split(" ")[1] if auth_header.startswith("Bearer ") else None
+
+    try:
+        result = delete_account(db, user)
+    except DeletionBlocked as exc:
+        blockers = exc.blockers
+        raise _deletion_error(
+            blockers[0]["code"],
+            "Your account cannot be deleted yet: " + " ".join(b["message"] for b in blockers),
+            status.HTTP_409_CONFLICT,
+            blockers=blockers,
+        )
+    attempt_limit.clear(DELETE_SCOPE, str(user.id))
+    if token:
+        blacklist_token(token)
+    for image_url in result["image_urls"]:
+        background_tasks.add_task(delete_image, image_url)
+    for user_id, title, body_text, data in result["notify"]:
+        notify_user(user_id, title, body_text, data)
+
+    return DeleteAccountResponse(message="Your account has been deleted.")
 
 
 # ============================================================================

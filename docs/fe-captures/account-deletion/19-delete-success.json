@@ -1,0 +1,15 @@
+{
+  "request": {
+    "method": "DELETE",
+    "path": "/auth/me",
+    "body": {
+      "password": "Placeholder-pw-1"
+    }
+  },
+  "status": 200,
+  "response": {
+    "success": true,
+    "message": "Your account has been deleted."
+  },
+  "note": "customer: pending booking auto-cancelled, completed+paid history kept"
+}

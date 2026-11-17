@@ -1,0 +1,25 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+      "email": "refunder@example.com",
+      "password": "<placeholder>"
+    }
+  },
+  "status": 200,
+  "response": {
+    "success": true,
+    "message": "Login successful",
+    "token": "<jwt redacted>",
+    "user": {
+      "id": "6e80b006-ad2d-45df-a2ce-d698497fcfac",
+      "full_name": "Refund Customer",
+      "email": "refunder@example.com",
+      "phone_number": "+2348000000007",
+      "user_type": "client",
+      "profile_picture_url": null,
+      "bio": null
+    }
+  }
+}
