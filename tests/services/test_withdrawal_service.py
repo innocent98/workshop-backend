@@ -149,6 +149,17 @@ def test_below_minimum_is_rejected(db, world, paystack):
     assert paystack.transfer_calls == []
 
 
+def test_transferred_total_must_also_meet_the_minimum(db, world, paystack):
+    artisan, _, _ = world
+    _fund(db, world, "2000.00", "2000.00")  # 1800 each, 3600 withdrawable in total
+    with pytest.raises(svc.WithdrawalError) as exc:
+        _request(db, artisan, "5000")  # requested >= minimum, but only 3600 fits
+    assert exc.value.status_code == 400
+    assert "below the minimum payout" in exc.value.detail
+    assert paystack.verify_calls == [] and paystack.transfer_calls == []
+    assert db.query(Withdrawal).count() == 0
+
+
 def test_min_payout_is_a_setting(db, world, paystack, monkeypatch):
     from app.core.config import settings
 

@@ -129,6 +129,17 @@ def select_payments(payments: List[Payment], requested: Decimal) -> List[Payment
     return chosen
 
 
+def check_minimum_total(chosen: List[Payment]) -> None:
+    """The amount actually transferred (whole payments) must also meet the minimum payout."""
+    total = sum((p.artisan_amount for p in chosen), Decimal("0"))
+    if total < settings.MIN_PAYOUT_NGN:
+        raise WithdrawalError(
+            400,
+            f"The completed jobs that fit your request total {naira(total)}, which is below "
+            f"the minimum payout of {naira(settings.MIN_PAYOUT_NGN)}.",
+        )
+
+
 def no_fit_error(payments: List[Payment], requested: Decimal) -> WithdrawalError:
     if not payments:
         return WithdrawalError(400, "You have no withdrawable balance right now.")
@@ -181,8 +192,10 @@ def request_withdrawal(
 
     # Fast, unlocked feasibility check so we do not call Paystack for hopeless requests.
     candidates = eligible_payments_query(db, artisan_id).all()
-    if not select_payments(candidates, amount):
+    preview = select_payments(candidates, amount)
+    if not preview:
         raise no_fit_error(candidates, amount)
+    check_minimum_total(preview)
 
     # Stateless Paystack calls (no DB locks held while we wait on the network).
     try:
@@ -253,6 +266,7 @@ def _create_locked(
         chosen = select_payments(payments, amount)
         if not chosen:
             raise no_fit_error(payments, amount)
+        check_minimum_total(chosen)
 
         total = sum((p.artisan_amount for p in chosen), Decimal("0"))
         withdrawal = Withdrawal(

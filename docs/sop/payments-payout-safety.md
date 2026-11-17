@@ -48,8 +48,9 @@ A code audit found real defects in the money paths:
    - Outcome handling: 4xx from Paystack = definitive rejection → withdrawal `failed`, payments unlinked, client
      gets a generic `502`. Timeout/5xx = outcome unknown → stays `processing` (the webhook settles it). Transfer
      status `otp` → reverted + ERROR log (Paystack transfer OTP must be disabled in the dashboard).
-   - `MIN_PAYOUT_NGN` (default `5000`) applies to the *requested* amount. The response `amount` is the **actual**
-     transfer total; `requested_amount` is echoed. If nothing fits: `400` naming the nearest withdrawable amount
+   - `MIN_PAYOUT_NGN` (default `5000`) applies to the *requested* amount AND to the actual transfer total
+     (whole-payment selection that would transfer less than the minimum is a 400, before Paystack is called).
+     The response `amount` is the **actual** transfer total; `requested_amount` is echoed. If nothing fits: `400` naming the nearest withdrawable amount
      (the smallest eligible payment).
 5. **Transfer webhooks** (`settle_transfer_success`, `settle_transfer_failure`): `transfer.success` → withdrawal
    `success`, payments `RELEASED` with `released_at` and a unique per-payment `payout_reference`
@@ -125,6 +126,5 @@ a PG enum for withdrawal status (needs `ALTER TYPE` for every change).
 
 - Reconciliation job for withdrawals stuck in `processing` (poll `GET /transfer/verify/:reference`).
 - Admin-only manual release / refund flows (admin stream) must go through the same withdrawal ledger.
-- Minimum applies to the requested, not the transferred, amount (whole-payment selection can transfer less).
 - Repo-wide `black`/`flake8` baseline is red on `main` (59 files); lint job stays red until a format-only PR.
 - Webhook IP allow-listing / replay-window check is not implemented (signature only).
