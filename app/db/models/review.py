@@ -1,10 +1,7 @@
-from sqlalchemy import (
-    Column, Integer, String, Text, DateTime, ForeignKey,
-    Boolean, Float, CheckConstraint
-)
+from sqlalchemy import Boolean, CheckConstraint, Column, DateTime, Float, ForeignKey, Integer, Text
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
 
 from app.db.base import Base
 
@@ -16,6 +13,7 @@ class Review(Base):
     Customers can review artisans after job completion.
     Artisans can respond to reviews.
     """
+
     __tablename__ = "reviews"
 
     # Primary Key
@@ -27,19 +25,13 @@ class Review(Base):
         ForeignKey("bookings.id", ondelete="CASCADE"),
         unique=True,
         nullable=False,
-        index=True
+        index=True,
     )
     customer_id = Column(
-        UUID(as_uuid=True),
-        ForeignKey("users.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     artisan_id = Column(
-        UUID(as_uuid=True),
-        ForeignKey("users.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
     # Review Details
@@ -56,11 +48,13 @@ class Review(Base):
 
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
 
     # Constraints
     __table_args__ = (
-        CheckConstraint('rating >= 1.0 AND rating <= 5.0', name='check_rating_range'),
+        CheckConstraint("rating >= 1.0 AND rating <= 5.0", name="check_rating_range"),
     )
 
     # Relationships

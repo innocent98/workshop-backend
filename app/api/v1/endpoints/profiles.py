@@ -1,36 +1,35 @@
 """
 User Profile endpoints (Customer and Artisan).
 """
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
-from sqlalchemy.orm import Session
-from sqlalchemy import func
-from typing import Optional, List
-from geoalchemy2.functions import ST_SetSRID, ST_MakePoint
 
-from app.db.session import get_db
-from app.db.models.user import User, UserType
-from app.db.models.artisan_profile import ArtisanProfile, AvailabilityStatus
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
+from app.api.deps import get_current_user
+from app.core.logger import logger
+from app.db.models.artisan_profile import ArtisanProfile
 from app.db.models.portfolio import Portfolio
 from app.db.models.service import Service, UserService
-from app.api.deps import get_current_user
+from app.db.models.user import User, UserType
+from app.db.session import get_db
+from app.schemas.portfolio import PortfolioResponse, PortfolioUpdate
 from app.schemas.profile import (
-    CustomerProfileResponse,
-    CustomerProfileUpdate,
+    ArtisanAvailabilityUpdate,
     ArtisanProfileResponse,
     ArtisanProfileUpdate,
-    ArtisanAvailabilityUpdate,
-    ArtisanStatsResponse,
     ArtisanPublicProfileResponse,
-    LocationInput,
-    ProfilePictureResponse,
-    ArtisanServiceSelectionUpdate,
     ArtisanServiceSelectionResponse,
+    ArtisanServiceSelectionUpdate,
+    ArtisanStatsResponse,
+    CustomerProfileResponse,
+    CustomerProfileUpdate,
+    ProfilePictureResponse,
 )
-from app.schemas.portfolio import PortfolioResponse, PortfolioCreate, PortfolioUpdate
-from app.utils.file_upload import save_profile_picture, save_portfolio_image, delete_image
+from app.utils.file_upload import delete_image, save_portfolio_image, save_profile_picture
 from app.utils.location import resolve_location_label
-from app.core.logger import logger
-
 
 router = APIRouter()
 
@@ -50,10 +49,10 @@ def _resolve_address_or_fallback(latitude: float, longitude: float) -> str:
 
 # ==================== Customer Profile Endpoints ====================
 
+
 @router.get("/customers/me", response_model=CustomerProfileResponse)
 def get_my_customer_profile(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ):
     """
     Get current user's customer profile.
@@ -80,7 +79,7 @@ def get_my_customer_profile(
 def update_my_customer_profile(
     profile_update: CustomerProfileUpdate,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Update current user's customer profile.
@@ -91,14 +90,17 @@ def update_my_customer_profile(
             current_user.full_name = profile_update.full_name
         if profile_update.phone_number is not None:
             # Check if phone number is already taken by another user
-            existing = db.query(User).filter(
-                User.phone_number == profile_update.phone_number,
-                User.id != current_user.id
-            ).first()
+            existing = (
+                db.query(User)
+                .filter(
+                    User.phone_number == profile_update.phone_number, User.id != current_user.id
+                )
+                .first()
+            )
             if existing:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Phone number already registered"
+                    detail="Phone number already registered",
                 )
             current_user.phone_number = profile_update.phone_number
         if profile_update.bio is not None:
@@ -143,17 +145,16 @@ def update_my_customer_profile(
         db.rollback()
         logger.error(f"Error updating customer profile: {str(e)}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update profile"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update profile"
         )
 
 
 # ==================== Artisan Profile Endpoints ====================
 
+
 @router.get("/artisans/me", response_model=ArtisanProfileResponse)
 def get_my_artisan_profile(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ):
     """
     Get current user's artisan profile (private view).
@@ -161,14 +162,13 @@ def get_my_artisan_profile(
     """
     if current_user.user_type != UserType.ARTISAN:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only artisans can access this endpoint"
+            status_code=status.HTTP_403_FORBIDDEN, detail="Only artisans can access this endpoint"
         )
 
     # Get or create artisan profile
-    artisan_profile = db.query(ArtisanProfile).filter(
-        ArtisanProfile.user_id == current_user.id
-    ).first()
+    artisan_profile = (
+        db.query(ArtisanProfile).filter(ArtisanProfile.user_id == current_user.id).first()
+    )
 
     if not artisan_profile:
         # Create default profile
@@ -211,7 +211,7 @@ def get_my_artisan_profile(
 def update_my_artisan_profile(
     profile_update: ArtisanProfileUpdate,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Update current user's artisan profile.
@@ -219,8 +219,7 @@ def update_my_artisan_profile(
     """
     if current_user.user_type != UserType.ARTISAN:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only artisans can access this endpoint"
+            status_code=status.HTTP_403_FORBIDDEN, detail="Only artisans can access this endpoint"
         )
 
     try:
@@ -228,14 +227,17 @@ def update_my_artisan_profile(
             current_user.full_name = profile_update.full_name
 
         if profile_update.phone_number is not None:
-            existing = db.query(User).filter(
-                User.phone_number == profile_update.phone_number,
-                User.id != current_user.id
-            ).first()
+            existing = (
+                db.query(User)
+                .filter(
+                    User.phone_number == profile_update.phone_number, User.id != current_user.id
+                )
+                .first()
+            )
             if existing:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Phone number already registered"
+                    detail="Phone number already registered",
                 )
             current_user.phone_number = profile_update.phone_number
 
@@ -243,9 +245,9 @@ def update_my_artisan_profile(
             current_user.bio = profile_update.bio
 
         # Get or create artisan profile
-        artisan_profile = db.query(ArtisanProfile).filter(
-            ArtisanProfile.user_id == current_user.id
-        ).first()
+        artisan_profile = (
+            db.query(ArtisanProfile).filter(ArtisanProfile.user_id == current_user.id).first()
+        )
 
         if not artisan_profile:
             artisan_profile = ArtisanProfile(user_id=current_user.id)
@@ -256,10 +258,9 @@ def update_my_artisan_profile(
             # Create PostGIS POINT
             point = func.ST_SetSRID(
                 func.ST_MakePoint(
-                    profile_update.location.longitude,
-                    profile_update.location.latitude
+                    profile_update.location.longitude, profile_update.location.latitude
                 ),
-                4326
+                4326,
             )
             artisan_profile.location = point
 
@@ -325,7 +326,7 @@ def update_my_artisan_profile(
         logger.error(f"Error updating artisan profile: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update artisan profile"
+            detail="Failed to update artisan profile",
         )
 
 
@@ -333,7 +334,7 @@ def update_my_artisan_profile(
 async def update_profile_picture(
     profile_picture: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Upload or replace current user's profile picture.
@@ -345,7 +346,7 @@ async def update_profile_picture(
         if not image_url:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to upload profile picture"
+                detail="Failed to upload profile picture",
             )
 
         current_user.profile_picture_url = image_url
@@ -367,7 +368,7 @@ async def update_profile_picture(
         logger.error(f"Error updating profile picture: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update profile picture"
+            detail="Failed to update profile picture",
         )
 
 
@@ -375,7 +376,7 @@ async def update_profile_picture(
 def update_artisan_availability(
     availability_update: ArtisanAvailabilityUpdate,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Toggle artisan availability status.
@@ -383,14 +384,13 @@ def update_artisan_availability(
     """
     if current_user.user_type != UserType.ARTISAN:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only artisans can access this endpoint"
+            status_code=status.HTTP_403_FORBIDDEN, detail="Only artisans can access this endpoint"
         )
 
     try:
-        artisan_profile = db.query(ArtisanProfile).filter(
-            ArtisanProfile.user_id == current_user.id
-        ).first()
+        artisan_profile = (
+            db.query(ArtisanProfile).filter(ArtisanProfile.user_id == current_user.id).first()
+        )
 
         if not artisan_profile:
             artisan_profile = ArtisanProfile(user_id=current_user.id)
@@ -401,7 +401,9 @@ def update_artisan_availability(
         db.commit()
         db.refresh(artisan_profile)
 
-        logger.info(f"Artisan availability updated to {availability_update.availability_status} for user {current_user.id}")
+        logger.info(
+            f"Artisan availability updated to {availability_update.availability_status} for user {current_user.id}"  # noqa: E501
+        )
 
         # Return combined data
         response_data = {
@@ -436,14 +438,13 @@ def update_artisan_availability(
         logger.error(f"Error updating availability: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update availability"
+            detail="Failed to update availability",
         )
 
 
 @router.get("/artisans/me/stats", response_model=ArtisanStatsResponse)
 def get_my_artisan_stats(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ):
     """
     Get artisan statistics (ratings, jobs completed, etc.).
@@ -451,13 +452,12 @@ def get_my_artisan_stats(
     """
     if current_user.user_type != UserType.ARTISAN:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only artisans can access this endpoint"
+            status_code=status.HTTP_403_FORBIDDEN, detail="Only artisans can access this endpoint"
         )
 
-    artisan_profile = db.query(ArtisanProfile).filter(
-        ArtisanProfile.user_id == current_user.id
-    ).first()
+    artisan_profile = (
+        db.query(ArtisanProfile).filter(ArtisanProfile.user_id == current_user.id).first()
+    )
 
     if not artisan_profile:
         # Return default stats
@@ -466,7 +466,7 @@ def get_my_artisan_stats(
             total_ratings=0,
             total_jobs_completed=0,
             response_time_avg_minutes=None,
-            acceptance_rate=0.0
+            acceptance_rate=0.0,
         )
 
     return artisan_profile
@@ -546,9 +546,7 @@ def update_my_artisan_services(
             .all()
         )
 
-        logger.info(
-            f"Updated artisan services for user {current_user.id}: {requested_ids}"
-        )
+        logger.info(f"Updated artisan services for user {current_user.id}: {requested_ids}")
         return updated_services
     except HTTPException:
         db.rollback()
@@ -563,10 +561,7 @@ def update_my_artisan_services(
 
 
 @router.get("/artisans/{artisan_id}", response_model=ArtisanPublicProfileResponse)
-def get_artisan_public_profile(
-    artisan_id: str,
-    db: Session = Depends(get_db)
-):
+def get_artisan_public_profile(artisan_id: str, db: Session = Depends(get_db)):
     """
     Get artisan public profile (what customers see).
     Available to all users.
@@ -575,21 +570,15 @@ def get_artisan_public_profile(
         # Get user
         user = db.query(User).filter(User.id == artisan_id).first()
         if not user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Artisan not found"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artisan not found")
 
         if user.user_type != UserType.ARTISAN:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="User is not an artisan"
+                status_code=status.HTTP_400_BAD_REQUEST, detail="User is not an artisan"
             )
 
         # Get artisan profile
-        artisan_profile = db.query(ArtisanProfile).filter(
-            ArtisanProfile.user_id == user.id
-        ).first()
+        artisan_profile = db.query(ArtisanProfile).filter(ArtisanProfile.user_id == user.id).first()
 
         if not artisan_profile:
             # Create default if doesn't exist
@@ -623,42 +612,44 @@ def get_artisan_public_profile(
         logger.error(f"Error fetching artisan profile: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch artisan profile"
+            detail="Failed to fetch artisan profile",
         )
 
 
 # ==================== Portfolio Endpoints ====================
 
+
 @router.get("/artisans/me/portfolio", response_model=List[PortfolioResponse])
-def get_my_portfolio(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
+def get_my_portfolio(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """
     Get current artisan's portfolio items.
     Only available to artisans.
     """
     if current_user.user_type != UserType.ARTISAN:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only artisans can access this endpoint"
+            status_code=status.HTTP_403_FORBIDDEN, detail="Only artisans can access this endpoint"
         )
 
-    portfolio_items = db.query(Portfolio).filter(
-        Portfolio.artisan_id == current_user.id
-    ).order_by(Portfolio.display_order, Portfolio.created_at.desc()).all()
+    portfolio_items = (
+        db.query(Portfolio)
+        .filter(Portfolio.artisan_id == current_user.id)
+        .order_by(Portfolio.display_order, Portfolio.created_at.desc())
+        .all()
+    )
 
     return portfolio_items
 
 
-@router.post("/artisans/me/portfolio", response_model=PortfolioResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/artisans/me/portfolio", response_model=PortfolioResponse, status_code=status.HTTP_201_CREATED
+)
 async def add_portfolio_item(
     title: Optional[str] = Form(None),
     description: Optional[str] = Form(None),
     display_order: int = Form(0),
     image: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Add new portfolio item with image upload.
@@ -666,8 +657,7 @@ async def add_portfolio_item(
     """
     if current_user.user_type != UserType.ARTISAN:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only artisans can access this endpoint"
+            status_code=status.HTTP_403_FORBIDDEN, detail="Only artisans can access this endpoint"
         )
 
     try:
@@ -676,7 +666,7 @@ async def add_portfolio_item(
         if not image_url:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to upload portfolio image"
+                detail="Failed to upload portfolio image",
             )
 
         # Create portfolio item
@@ -685,7 +675,7 @@ async def add_portfolio_item(
             image_url=image_url,
             title=title,
             description=description,
-            display_order=display_order
+            display_order=display_order,
         )
 
         db.add(portfolio_item)
@@ -701,8 +691,7 @@ async def add_portfolio_item(
         db.rollback()
         logger.error(f"Error adding portfolio item: {str(e)}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to add portfolio item"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to add portfolio item"
         )
 
 
@@ -711,7 +700,7 @@ def update_portfolio_item(
     item_id: int,
     portfolio_update: PortfolioUpdate,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Update portfolio item (metadata only, not image).
@@ -719,20 +708,19 @@ def update_portfolio_item(
     """
     if current_user.user_type != UserType.ARTISAN:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only artisans can access this endpoint"
+            status_code=status.HTTP_403_FORBIDDEN, detail="Only artisans can access this endpoint"
         )
 
     try:
-        portfolio_item = db.query(Portfolio).filter(
-            Portfolio.id == item_id,
-            Portfolio.artisan_id == current_user.id
-        ).first()
+        portfolio_item = (
+            db.query(Portfolio)
+            .filter(Portfolio.id == item_id, Portfolio.artisan_id == current_user.id)
+            .first()
+        )
 
         if not portfolio_item:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Portfolio item not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Portfolio item not found"
             )
 
         # Update fields
@@ -758,15 +746,13 @@ def update_portfolio_item(
         logger.error(f"Error updating portfolio item: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update portfolio item"
+            detail="Failed to update portfolio item",
         )
 
 
 @router.delete("/artisans/me/portfolio/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_portfolio_item(
-    item_id: int,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    item_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ):
     """
     Delete portfolio item.
@@ -774,20 +760,19 @@ async def delete_portfolio_item(
     """
     if current_user.user_type != UserType.ARTISAN:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only artisans can access this endpoint"
+            status_code=status.HTTP_403_FORBIDDEN, detail="Only artisans can access this endpoint"
         )
 
     try:
-        portfolio_item = db.query(Portfolio).filter(
-            Portfolio.id == item_id,
-            Portfolio.artisan_id == current_user.id
-        ).first()
+        portfolio_item = (
+            db.query(Portfolio)
+            .filter(Portfolio.id == item_id, Portfolio.artisan_id == current_user.id)
+            .first()
+        )
 
         if not portfolio_item:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Portfolio item not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Portfolio item not found"
             )
 
         # Delete image from storage
@@ -807,15 +792,12 @@ async def delete_portfolio_item(
         logger.error(f"Error deleting portfolio item: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to delete portfolio item"
+            detail="Failed to delete portfolio item",
         )
 
 
 @router.get("/artisans/{artisan_id}/portfolio", response_model=List[PortfolioResponse])
-def get_artisan_portfolio(
-    artisan_id: str,
-    db: Session = Depends(get_db)
-):
+def get_artisan_portfolio(artisan_id: str, db: Session = Depends(get_db)):
     """
     Get artisan's portfolio (public view).
     Available to all users.
@@ -824,14 +806,14 @@ def get_artisan_portfolio(
         # Verify artisan exists
         user = db.query(User).filter(User.id == artisan_id).first()
         if not user or user.user_type != UserType.ARTISAN:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Artisan not found"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artisan not found")
 
-        portfolio_items = db.query(Portfolio).filter(
-            Portfolio.artisan_id == artisan_id
-        ).order_by(Portfolio.display_order, Portfolio.created_at.desc()).all()
+        portfolio_items = (
+            db.query(Portfolio)
+            .filter(Portfolio.artisan_id == artisan_id)
+            .order_by(Portfolio.display_order, Portfolio.created_at.desc())
+            .all()
+        )
 
         return portfolio_items
 
@@ -840,6 +822,5 @@ def get_artisan_portfolio(
     except Exception as e:
         logger.error(f"Error fetching portfolio: {str(e)}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch portfolio"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to fetch portfolio"
         )

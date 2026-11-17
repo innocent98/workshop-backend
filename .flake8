@@ -1,5 +1,9 @@
 [flake8]
 # Match black (line-length = 100 in pyproject.toml); E203/W503 conflict with black's style.
 max-line-length = 100
-extend-ignore = E203, W503
+# E712: SQLAlchemy filters need `== True/False` (`is True` is not translated to SQL).
+extend-ignore = E203, W503, E712
+per-file-ignores =
+    # Inline HTML/CSS template strings
+    app/utils/email.py: E501
 exclude = .git, __pycache__, .venv, alembic/versions

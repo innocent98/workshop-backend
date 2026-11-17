@@ -1,6 +1,7 @@
 from datetime import datetime
-from sqlalchemy.orm import Session
+
 from sqlalchemy import func
+from sqlalchemy.orm import Session
 
 
 def generate_booking_reference(db: Session) -> str:
@@ -22,9 +23,7 @@ def generate_booking_reference(db: Session) -> str:
 
     # Get the count of bookings created this year
     year_start = datetime(current_year, 1, 1)
-    count = db.query(func.count(Booking.id)).filter(
-        Booking.created_at >= year_start
-    ).scalar() or 0
+    count = db.query(func.count(Booking.id)).filter(Booking.created_at >= year_start).scalar() or 0
 
     # Generate reference with next number
     next_number = count + 1

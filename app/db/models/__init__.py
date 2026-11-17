@@ -1,18 +1,18 @@
 # Import all models here so Alembic can detect them
-from app.db.models.user import User, UserType
-from app.db.models.otp import OTP, OTPType
-from app.db.models.service import Service, UserService
-from app.db.models.password_reset import PasswordResetToken
-from app.db.models.service_category import ServiceCategory
 from app.db.models.artisan_profile import ArtisanProfile, AvailabilityStatus
-from app.db.models.portfolio import Portfolio
 from app.db.models.booking import Booking, BookingStatus
-from app.db.models.payment import Payment, PaymentStatus, PaymentMethod, PaymentReference
-from app.db.models.withdrawal import Withdrawal, WithdrawalStatus
-from app.db.models.review import Review
 from app.db.models.booking_progress_log import BookingProgressLog
+from app.db.models.otp import OTP, OTPType
+from app.db.models.password_reset import PasswordResetToken
+from app.db.models.payment import Payment, PaymentMethod, PaymentReference, PaymentStatus
+from app.db.models.portfolio import Portfolio
 from app.db.models.push_device import PushDevice, PushPlatform
+from app.db.models.review import Review
+from app.db.models.service import Service, UserService
+from app.db.models.service_category import ServiceCategory
+from app.db.models.user import User, UserType
 from app.db.models.user_notification import UserNotification
+from app.db.models.withdrawal import Withdrawal, WithdrawalStatus
 
 __all__ = [
     "User",

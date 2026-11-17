@@ -1,14 +1,17 @@
 """
 Pydantic schemas for Artisan Portfolio.
 """
-from pydantic import BaseModel, Field
-from typing import Optional
+
 from datetime import datetime
+from typing import Optional
 from uuid import UUID
+
+from pydantic import BaseModel, Field
 
 
 class PortfolioBase(BaseModel):
     """Base schema for Portfolio"""
+
     title: Optional[str] = Field(None, max_length=200)
     description: Optional[str] = Field(None, max_length=2000)
     project_date: Optional[datetime] = None
@@ -17,11 +20,13 @@ class PortfolioBase(BaseModel):
 
 class PortfolioCreate(PortfolioBase):
     """Schema for creating portfolio item (image_url will be set after upload)"""
+
     pass
 
 
 class PortfolioUpdate(BaseModel):
     """Schema for updating portfolio item"""
+
     title: Optional[str] = Field(None, max_length=200)
     description: Optional[str] = Field(None, max_length=2000)
     project_date: Optional[datetime] = None
@@ -30,6 +35,7 @@ class PortfolioUpdate(BaseModel):
 
 class PortfolioResponse(PortfolioBase):
     """Schema for portfolio response"""
+
     id: int
     artisan_id: UUID
     image_url: str

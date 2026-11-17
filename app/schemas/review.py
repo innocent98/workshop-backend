@@ -1,47 +1,55 @@
 from datetime import datetime
-from typing import Optional, List
-from pydantic import BaseModel, Field, field_validator, ConfigDict
+from typing import List, Optional
 from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class CreateReviewRequest(BaseModel):
     """Request schema for creating a review"""
+
     booking_id: int = Field(..., gt=0)
     rating: float = Field(..., ge=1.0, le=5.0)
     review_text: Optional[str] = Field(None, max_length=1000)
     is_anonymous: bool = False
 
-    @field_validator('rating')
+    @field_validator("rating")
     @classmethod
     def validate_rating(cls, v):
         # Ensure rating is in 0.5 increments
         if (v * 2) % 1 != 0:
-            raise ValueError('Rating must be in 0.5 increments (e.g., 3.5, 4.0)')
+            raise ValueError("Rating must be in 0.5 increments (e.g., 3.5, 4.0)")
         return v
 
-    model_config = ConfigDict(json_schema_extra={
-        "example": {
-            "booking_id": 1,
-            "rating": 4.5,
-            "review_text": "Excellent service! The plumber was professional and fixed the issue quickly.",
-            "is_anonymous": False
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "booking_id": 1,
+                "rating": 4.5,
+                "review_text": "Excellent service! The plumber was professional and fixed the issue quickly.",  # noqa: E501
+                "is_anonymous": False,
+            }
         }
-    })
+    )
 
 
 class RespondToReviewRequest(BaseModel):
     """Request schema for artisan responding to a review"""
+
     artisan_response: str = Field(..., min_length=10, max_length=500)
 
-    model_config = ConfigDict(json_schema_extra={
-        "example": {
-            "artisan_response": "Thank you for the kind words! It was a pleasure working with you."
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "artisan_response": "Thank you for the kind words! It was a pleasure working with you."  # noqa: E501
+            }
         }
-    })
+    )
 
 
 class ReviewResponse(BaseModel):
     """Response schema for review details"""
+
     id: int
     booking_id: int
     customer_id: UUID
@@ -64,6 +72,7 @@ class ReviewResponse(BaseModel):
 
 class ReviewListResponse(BaseModel):
     """Response schema for list of reviews"""
+
     reviews: List[ReviewResponse]
     total: int
     average_rating: float
@@ -72,6 +81,7 @@ class ReviewListResponse(BaseModel):
 
 class ArtisanReviewStatsResponse(BaseModel):
     """Response schema for artisan review statistics"""
+
     artisan_id: UUID
     total_reviews: int
     average_rating: float

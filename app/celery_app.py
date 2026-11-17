@@ -1,7 +1,9 @@
 """
 Celery application instance and configuration.
 """
+
 from celery import Celery
+
 from app.core.config import settings
 
 # Create Celery instance

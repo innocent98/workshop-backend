@@ -1,13 +1,13 @@
 """
 Token blacklist using Redis for logout functionality.
 """
-import redis
+
 from datetime import timedelta
-from typing import Optional
+
+import redis
 
 from app.core.config import settings
 from app.core.logger import logger
-
 
 # Initialize Redis client for token blacklist
 try:
@@ -40,7 +40,7 @@ def blacklist_token(token: str, expiry_minutes: int = None) -> bool:
         # Store token with expiry
         key = f"blacklist:{token}"
         redis_client.setex(key, timedelta(minutes=expiry_minutes), "1")
-        logger.info(f"Token blacklisted successfully")
+        logger.info("Token blacklisted successfully")
         return True
 
     except Exception as e:

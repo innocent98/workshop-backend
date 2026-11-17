@@ -1,40 +1,39 @@
 """
 Wallet endpoints for artisan earnings and payout management.
 """
-from typing import Optional
-from fastapi import APIRouter, Depends, Header, HTTPException, status, Query
-from sqlalchemy.orm import Session
-from sqlalchemy import func, and_
-from decimal import Decimal
 
-from app.db.session import get_db
+from decimal import Decimal
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from sqlalchemy import and_, func
+from sqlalchemy.orm import Session
+
 from app.api.deps import get_current_user
 from app.core.config import settings
-from app.db.models.user import User, UserType
 from app.db.models.booking import Booking, BookingStatus
 from app.db.models.payment import Payment, PaymentStatus
 from app.db.models.service import Service
+from app.db.models.user import User, UserType
 from app.db.models.withdrawal import Withdrawal
+from app.db.session import get_db
 from app.schemas.wallet import (
-    WalletBalanceResponse,
-    EarningItemResponse,
-    EarningsHistoryResponse,
-    PayoutItemResponse,
-    PayoutsHistoryResponse,
     BankItemResponse,
-    VerifyAccountRequest,
-    VerifyAccountResponse,
+    EarningsHistoryResponse,
+    PayoutsHistoryResponse,
     RequestPayoutRequest,
     RequestPayoutResponse,
+    VerifyAccountRequest,
+    VerifyAccountResponse,
+    WalletBalanceResponse,
 )
-from app.services.paystack import PaystackService, PaystackError
+from app.services.paystack import PaystackError, PaystackService
 from app.services.withdrawal_service import (
     WithdrawalError,
     available_balance,
     pending_withdrawal_amount,
     request_withdrawal,
 )
-
 
 router = APIRouter()
 
@@ -50,8 +49,7 @@ async def get_supported_banks(
     """
     if current_user.user_type != UserType.ARTISAN:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only artisans have wallet access"
+            status_code=status.HTTP_403_FORBIDDEN, detail="Only artisans have wallet access"
         )
 
     try:
@@ -59,16 +57,18 @@ async def get_supported_banks(
     except PaystackError as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch banks: {str(e)}"
+            detail=f"Failed to fetch banks: {str(e)}",
         )
 
     bank_items = []
     for bank in banks:
-        bank_items.append({
-            "name": bank.get("name", ""),
-            "code": bank.get("code", ""),
-            "slug": bank.get("slug"),
-        })
+        bank_items.append(
+            {
+                "name": bank.get("name", ""),
+                "code": bank.get("code", ""),
+                "slug": bank.get("slug"),
+            }
+        )
 
     # Return a stable, user-friendly order
     bank_items.sort(key=lambda item: item["name"].lower())
@@ -87,20 +87,15 @@ async def verify_bank_account(
     """
     if current_user.user_type != UserType.ARTISAN:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only artisans have wallet access"
+            status_code=status.HTTP_403_FORBIDDEN, detail="Only artisans have wallet access"
         )
 
     try:
         verification = PaystackService.verify_account_number(
-            account_number=request.account_number,
-            bank_code=request.bank_code
+            account_number=request.account_number, bank_code=request.bank_code
         )
     except PaystackError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
     return {
         "account_number": verification.get("account_number", request.account_number),
@@ -118,15 +113,16 @@ def _require_artisan(user: User, detail: str) -> None:
 
 def _artisan_payments(db: Session, artisan_id):
     """Base query: every payment belonging to this artisan's bookings."""
-    return db.query(Payment).join(Booking, Booking.id == Payment.booking_id).filter(
-        Booking.artisan_id == artisan_id
+    return (
+        db.query(Payment)
+        .join(Booking, Booking.id == Payment.booking_id)
+        .filter(Booking.artisan_id == artisan_id)
     )
 
 
 @router.get("/balance", response_model=WalletBalanceResponse)
 async def get_wallet_balance(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ):
     """
     Get wallet balance and earnings summary for artisan.
@@ -149,19 +145,26 @@ async def get_wallet_balance(
         Payment.status.in_([PaymentStatus.SUCCESS, PaymentStatus.RELEASED]),
     ).with_entities(func.sum(Payment.platform_fee)).scalar() or Decimal(0)
 
-    total_jobs_completed = db.query(func.count(Booking.id)).filter(
-        and_(
-            Booking.artisan_id == artisan_id,
-            Booking.status == BookingStatus.COMPLETED
-        )
-    ).scalar() or 0
+    total_jobs_completed = (
+        db.query(func.count(Booking.id))
+        .filter(and_(Booking.artisan_id == artisan_id, Booking.status == BookingStatus.COMPLETED))
+        .scalar()
+        or 0
+    )
 
-    total_jobs_paid = db.query(func.count(Booking.id)).filter(
-        and_(
-            Booking.artisan_id == artisan_id,
-            Booking.status.in_([BookingStatus.PAID, BookingStatus.IN_PROGRESS, BookingStatus.COMPLETED])
+    total_jobs_paid = (
+        db.query(func.count(Booking.id))
+        .filter(
+            and_(
+                Booking.artisan_id == artisan_id,
+                Booking.status.in_(
+                    [BookingStatus.PAID, BookingStatus.IN_PROGRESS, BookingStatus.COMPLETED]
+                ),
+            )
         )
-    ).scalar() or 0
+        .scalar()
+        or 0
+    )
 
     return {
         "total_earned": total_earned,
@@ -183,7 +186,7 @@ async def get_earnings_history(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Get earnings history for artisan.
@@ -201,12 +204,16 @@ async def get_earnings_history(
             query = query.filter(Payment.status == status_enum)
         except ValueError:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid status: {status_filter}"
+                status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid status: {status_filter}"
             )
 
     total = query.count()
-    payments = query.order_by(Payment.created_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
+    payments = (
+        query.order_by(Payment.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
 
     earnings = []
     total_amount = Decimal(0)
@@ -219,24 +226,28 @@ async def get_earnings_history(
         customer = db.query(User).filter(User.id == booking.customer_id).first()
         service = db.query(Service).filter(Service.id == booking.service_id).first()
 
-        earnings.append({
-            "payment_id": payment.id,
-            "payment_reference": payment.payment_reference,
-            "booking_id": booking.id,
-            "booking_reference": booking.booking_reference,
-            "amount": payment.artisan_amount,
-            "gross_amount": payment.amount,
-            "platform_fee": payment.platform_fee,
-            "status": payment.status.value,
-            "customer_name": customer.full_name if customer else "Unknown",
-            "service_name": service.name if service else None,
-            "job_date": booking.job_date,
-            "paid_at": payment.paid_at,
-            "released_at": payment.released_at,
-            "created_at": payment.created_at,
-            "withdrawal_id": payment.withdrawal_id,
-            "withdrawal_status": payment.withdrawal.status.value if payment.withdrawal else None,
-        })
+        earnings.append(
+            {
+                "payment_id": payment.id,
+                "payment_reference": payment.payment_reference,
+                "booking_id": booking.id,
+                "booking_reference": booking.booking_reference,
+                "amount": payment.artisan_amount,
+                "gross_amount": payment.amount,
+                "platform_fee": payment.platform_fee,
+                "status": payment.status.value,
+                "customer_name": customer.full_name if customer else "Unknown",
+                "service_name": service.name if service else None,
+                "job_date": booking.job_date,
+                "paid_at": payment.paid_at,
+                "released_at": payment.released_at,
+                "created_at": payment.created_at,
+                "withdrawal_id": payment.withdrawal_id,
+                "withdrawal_status": (
+                    payment.withdrawal.status.value if payment.withdrawal else None
+                ),
+            }
+        )
 
         if payment.status in [PaymentStatus.SUCCESS, PaymentStatus.RELEASED]:
             total_amount += payment.artisan_amount
@@ -246,10 +257,7 @@ async def get_earnings_history(
         "total": total,
         "page": page,
         "page_size": page_size,
-        "summary": {
-            "total_amount": str(total_amount),
-            "count": len(earnings)
-        }
+        "summary": {"total_amount": str(total_amount), "count": len(earnings)},
     }
 
 
@@ -258,7 +266,7 @@ async def get_payout_history(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Get payout history for artisan.
@@ -269,12 +277,15 @@ async def get_payout_history(
     """
     _require_artisan(current_user, "Only artisans have payout history")
 
-    query = _artisan_payments(db, current_user.id).filter(
-        Payment.status == PaymentStatus.RELEASED
-    )
+    query = _artisan_payments(db, current_user.id).filter(Payment.status == PaymentStatus.RELEASED)
 
     total = query.count()
-    payments = query.order_by(Payment.released_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
+    payments = (
+        query.order_by(Payment.released_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
 
     payouts = []
     for payment in payments:
@@ -284,18 +295,20 @@ async def get_payout_history(
 
         customer = db.query(User).filter(User.id == booking.customer_id).first()
 
-        payouts.append({
-            "payment_id": payment.id,
-            "payment_reference": payment.payment_reference,
-            "payout_reference": payment.payout_reference,
-            "amount": payment.artisan_amount,
-            "gross_amount": payment.amount,
-            "platform_fee": payment.platform_fee,
-            "released_at": payment.released_at,
-            "booking_reference": booking.booking_reference,
-            "customer_name": customer.full_name if customer else "Unknown",
-            "withdrawal_id": payment.withdrawal_id,
-        })
+        payouts.append(
+            {
+                "payment_id": payment.id,
+                "payment_reference": payment.payment_reference,
+                "payout_reference": payment.payout_reference,
+                "amount": payment.artisan_amount,
+                "gross_amount": payment.amount,
+                "platform_fee": payment.platform_fee,
+                "released_at": payment.released_at,
+                "booking_reference": booking.booking_reference,
+                "customer_name": customer.full_name if customer else "Unknown",
+                "withdrawal_id": payment.withdrawal_id,
+            }
+        )
 
     withdrawals = (
         db.query(Withdrawal)
@@ -332,8 +345,7 @@ def _withdrawal_item(w: Withdrawal) -> dict:
 
 @router.get("/stats", response_model=dict)
 async def get_wallet_stats(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ):
     """
     Get detailed wallet statistics for artisan.
@@ -343,9 +355,11 @@ async def get_wallet_stats(
     """
     _require_artisan(current_user, "Only artisans have wallet stats")
 
-    successful_payments = _artisan_payments(db, current_user.id).filter(
-        Payment.status.in_([PaymentStatus.SUCCESS, PaymentStatus.RELEASED])
-    ).all()
+    successful_payments = (
+        _artisan_payments(db, current_user.id)
+        .filter(Payment.status.in_([PaymentStatus.SUCCESS, PaymentStatus.RELEASED]))
+        .all()
+    )
 
     available = available_balance(db, current_user.id)
     pending_withdrawal = pending_withdrawal_amount(db, current_user.id)
@@ -380,7 +394,7 @@ def request_payout(
     request: RequestPayoutRequest,
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Request a withdrawal to a bank account.
@@ -396,7 +410,7 @@ def request_payout(
     if key and len(key) > 100:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Idempotency-Key must be at most 100 characters"
+            detail="Idempotency-Key must be at most 100 characters",
         )
 
     try:

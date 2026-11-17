@@ -1,23 +1,23 @@
 """
 Email sending utilities with SMTP support and HTML templates.
 """
-import smtplib
+
 import asyncio
-from email.mime.text import MIMEText
+import smtplib
 from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from pathlib import Path
 from typing import Optional
+
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from app.core.logger import logger
 from app.core.config import settings
-
+from app.core.logger import logger
 
 # Setup Jinja2 template environment
 templates_dir = Path(__file__).parent.parent / "templates" / "emails"
 jinja_env = Environment(
-    loader=FileSystemLoader(templates_dir),
-    autoescape=select_autoescape(['html', 'xml'])
+    loader=FileSystemLoader(templates_dir), autoescape=select_autoescape(["html", "xml"])
 )
 
 
@@ -41,10 +41,7 @@ def render_template(template_name: str, **context) -> str:
 
 
 def send_email_smtp(
-    to_email: str,
-    subject: str,
-    html_content: str,
-    text_content: Optional[str] = None
+    to_email: str, subject: str, html_content: str, text_content: Optional[str] = None
 ) -> bool:
     """
     Send email using SMTP.
@@ -132,7 +129,7 @@ async def send_otp_email(email: str, otp_code: str, purpose: str = "verification
             "otp.html" if purpose != "password_reset" else "password_reset.html",
             title=title,
             message=message,
-            otp_code=otp_code
+            otp_code=otp_code,
         )
 
         # Plain text fallback
@@ -189,10 +186,7 @@ async def send_welcome_email(email: str, full_name: str) -> bool:
         subject = "Welcome to Workchop! 🎉"
 
         # Render HTML template
-        html_content = render_template(
-            "welcome.html",
-            full_name=full_name
-        )
+        html_content = render_template("welcome.html", full_name=full_name)
 
         # Plain text fallback
         text_content = f"""
@@ -223,11 +217,7 @@ Workchop Team
 
 
 def send_booking_notification(
-    email: str,
-    full_name: str,
-    booking_id: str,
-    service_name: str,
-    status: str
+    email: str, full_name: str, booking_id: str, service_name: str, status: str
 ) -> bool:
     """
     Send booking status notification email.

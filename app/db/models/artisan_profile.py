@@ -1,19 +1,32 @@
 """
 Artisan Profile model with location and service details.
 """
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Enum, Text, DECIMAL
-from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy import ForeignKey
-from sqlalchemy.sql import func
-from sqlalchemy.orm import relationship
-from geoalchemy2 import Geography
+
 import enum
+
+from geoalchemy2 import Geography
+from sqlalchemy import (
+    DECIMAL,
+    Boolean,
+    Column,
+    DateTime,
+    Enum,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+)
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
 
 from app.db.base import Base
 
 
 class AvailabilityStatus(str, enum.Enum):
     """Artisan availability status"""
+
     AVAILABLE = "available"
     BUSY = "busy"
     OFFLINE = "offline"
@@ -24,13 +37,20 @@ class ArtisanProfile(Base):
     Extended profile for artisan users.
     Contains artisan-specific information like location, rates, verification, etc.
     """
+
     __tablename__ = "artisan_profiles"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
 
     # Location (PostGIS)
-    location = Column(Geography(geometry_type='POINT', srid=4326), nullable=True)
+    location = Column(Geography(geometry_type="POINT", srid=4326), nullable=True)
     location_address = Column(String(500), nullable=True)  # Human-readable address
     service_radius_km = Column(Float, default=10.0, nullable=False)  # How far they'll travel
 
@@ -40,7 +60,9 @@ class ArtisanProfile(Base):
 
     # Experience
     years_of_experience = Column(Integer, nullable=True)
-    specialization = Column(String(200), nullable=True)  # e.g., "Residential plumbing", "Commercial electrical"
+    specialization = Column(
+        String(200), nullable=True
+    )  # e.g., "Residential plumbing", "Commercial electrical"
 
     # Verification
     is_verified = Column(Boolean, default=False, nullable=False)  # Admin-approved
@@ -52,7 +74,7 @@ class ArtisanProfile(Base):
     availability_status = Column(
         Enum(AvailabilityStatus, native_enum=False),
         default=AvailabilityStatus.AVAILABLE,
-        nullable=False
+        nullable=False,
     )
 
     # Statistics (updated by triggers/background jobs)
@@ -64,14 +86,19 @@ class ArtisanProfile(Base):
 
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
 
     # Relationships
     user = relationship("User", back_populates="artisan_profile")
-    portfolio = relationship("Portfolio", back_populates="artisan",
-                           primaryjoin="ArtisanProfile.user_id==Portfolio.artisan_id",
-                           foreign_keys="Portfolio.artisan_id",
-                           cascade="all, delete-orphan")
+    portfolio = relationship(
+        "Portfolio",
+        back_populates="artisan",
+        primaryjoin="ArtisanProfile.user_id==Portfolio.artisan_id",
+        foreign_keys="Portfolio.artisan_id",
+        cascade="all, delete-orphan",
+    )
 
     def __repr__(self):
         return f"<ArtisanProfile user_id={self.user_id} verified={self.is_verified}>"

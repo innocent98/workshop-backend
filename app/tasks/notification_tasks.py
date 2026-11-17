@@ -1,21 +1,20 @@
 """Notification-related background tasks using Celery."""
-from typing import Dict, Any, List
+
+from typing import Any, Dict, List
 
 from app.celery_app import celery_app
 from app.core.logger import logger
-from app.db.session import SessionLocal
 from app.db.models.push_device import PushDevice
 from app.db.models.user_notification import UserNotification
+from app.db.session import SessionLocal
 from app.services.fcm import send_to_token
 
 
-@celery_app.task(name="app.tasks.notification_tasks.send_push_notification", bind=True, max_retries=3)
+@celery_app.task(
+    name="app.tasks.notification_tasks.send_push_notification", bind=True, max_retries=3
+)
 def send_push_notification(
-    self,
-    user_id: str,
-    title: str,
-    body: str,
-    data: Dict[str, Any] = None
+    self, user_id: str, title: str, body: str, data: Dict[str, Any] = None
 ) -> Dict[str, Any]:
     """
     Send push notification to a user's registered devices.
@@ -43,10 +42,14 @@ def send_push_notification(
                 payload=normalized_data or None,
             )
         )
-        devices = db.query(PushDevice).filter(
-            PushDevice.user_id == user_id,
-            PushDevice.is_active.is_(True),
-        ).all()
+        devices = (
+            db.query(PushDevice)
+            .filter(
+                PushDevice.user_id == user_id,
+                PushDevice.is_active.is_(True),
+            )
+            .all()
+        )
         if not devices:
             db.commit()
             return {
@@ -83,17 +86,14 @@ def send_push_notification(
     except Exception as exc:
         db.rollback()
         logger.error(f"Error sending push notification to user {user_id}: {str(exc)}")
-        raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
+        raise self.retry(exc=exc, countdown=60 * (2**self.request.retries))
     finally:
         db.close()
 
 
 @celery_app.task(name="app.tasks.notification_tasks.send_bulk_notifications")
 def send_bulk_notifications(
-    user_ids: List[str],
-    title: str,
-    body: str,
-    data: Dict[str, Any] = None
+    user_ids: List[str], title: str, body: str, data: Dict[str, Any] = None
 ) -> Dict[str, Any]:
     """
     Send push notifications to multiple users.

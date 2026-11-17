@@ -1,9 +1,10 @@
 import secrets
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.sql import func
-from sqlalchemy.orm import relationship
 from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
 
 from app.db.base import Base
 
@@ -13,10 +14,13 @@ class PasswordResetToken(Base):
     Password reset token model for secure password recovery.
     Tokens are unique, expire after 30 minutes, and can only be used once.
     """
+
     __tablename__ = "password_reset_tokens"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     reset_token = Column(String(255), unique=True, nullable=False, index=True)
     is_used = Column(Boolean, default=False, nullable=False)
 

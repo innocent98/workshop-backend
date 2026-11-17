@@ -1,16 +1,16 @@
-from fastapi import FastAPI
+import time
+
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware
-from fastapi import Request, Response
-import time
-from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
+from starlette.middleware.base import BaseHTTPMiddleware
 
+from app.api.v1.api import api_router
 from app.core.config import settings
 from app.core.logger import log
 from app.core.rate_limit import limiter
-from app.api.v1.api import api_router
 
 
 class LoggingMiddleware(BaseHTTPMiddleware):
@@ -56,9 +56,7 @@ def custom_rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded)
 
     # Log the rate limit violation
     client_ip = get_remote_address(request)
-    log.warning(
-        f"Rate limit exceeded for {endpoint_name} from IP {client_ip}: {limit_detail}"
-    )
+    log.warning(f"Rate limit exceeded for {endpoint_name} from IP {client_ip}: {limit_detail}")
 
     # Build response with detailed information
     response = JSONResponse(
@@ -68,9 +66,9 @@ def custom_rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded)
             "details": {
                 "limit": limit_detail,
                 "endpoint": path,
-            }
+            },
         },
-        status_code=429
+        status_code=429,
     )
 
     # Inject rate limit headers (X-RateLimit-Limit, X-RateLimit-Remaining, etc.)
@@ -115,7 +113,7 @@ def root():
     return {
         "message": f"Welcome to {settings.PROJECT_NAME} API",
         "version": settings.VERSION,
-        "docs": f"{settings.API_V1_STR}/docs"
+        "docs": f"{settings.API_V1_STR}/docs",
     }
 
 
@@ -126,9 +124,10 @@ def health_check():
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(
         "app.main:app",
         host="0.0.0.0",
         port=settings.SERVER_PORT,
-        reload=True if settings.ENVIRONMENT == "development" else False
+        reload=True if settings.ENVIRONMENT == "development" else False,
     )

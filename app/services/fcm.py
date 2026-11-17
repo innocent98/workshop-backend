@@ -8,7 +8,6 @@ from firebase_admin import credentials, messaging
 from app.core.config import settings
 from app.core.logger import logger
 
-
 _firebase_initialized = False
 
 
@@ -67,11 +66,6 @@ def send_to_token(
                 messaging.UnregisteredError,
                 messaging.SenderIdMismatchError,
             ),
-        ) or (
-            isinstance(exc, messaging.InvalidArgumentError)
-            and "token" in str(exc).lower()
-        )
-        logger.warning(
-            f"Failed to send FCM to token (permanent={permanent_error}): {exc}"
-        )
+        ) or (isinstance(exc, messaging.InvalidArgumentError) and "token" in str(exc).lower())
+        logger.warning(f"Failed to send FCM to token (permanent={permanent_error}): {exc}")
         return False, permanent_error

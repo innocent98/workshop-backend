@@ -1,12 +1,14 @@
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional, List
-from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
+from typing import List, Optional
 from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class CreateBookingRequest(BaseModel):
     """Request schema for creating a new booking"""
+
     artisan_id: UUID
     service_id: Optional[int] = None
     service_ids: Optional[List[int]] = None
@@ -18,129 +20,135 @@ class CreateBookingRequest(BaseModel):
     budget_min: Decimal = Field(..., ge=0, decimal_places=2)
     budget_max: Decimal = Field(..., ge=0, decimal_places=2)
 
-    @field_validator('budget_max')
+    @field_validator("budget_max")
     @classmethod
     def validate_budget(cls, v, info):
-        budget_min = info.data.get('budget_min', 0)
+        budget_min = info.data.get("budget_min", 0)
         if v < budget_min:
-            raise ValueError('budget_max must be greater than or equal to budget_min')
+            raise ValueError("budget_max must be greater than or equal to budget_min")
         return v
 
-    @field_validator('job_date')
+    @field_validator("job_date")
     @classmethod
     def validate_job_date(cls, v):
         # Compare with a "now" value that matches the incoming datetime's timezone
         # to avoid offset-aware vs offset-naive comparison errors.
         now = datetime.now(v.tzinfo) if v.tzinfo else datetime.now()
         if v < now:
-            raise ValueError('job_date cannot be in the past')
+            raise ValueError("job_date cannot be in the past")
         return v
 
-    @field_validator('service_ids')
+    @field_validator("service_ids")
     @classmethod
     def validate_service_ids(cls, v):
         if v is None:
             return v
         if not v:
-            raise ValueError('service_ids must contain at least one service')
+            raise ValueError("service_ids must contain at least one service")
         deduped = list(dict.fromkeys(v))
         return deduped
 
-    @model_validator(mode='after')
+    @model_validator(mode="after")
     def validate_service_selection(self):
         if (self.service_ids is None or len(self.service_ids) == 0) and self.service_id is None:
-            raise ValueError('Either service_id or service_ids must be provided')
+            raise ValueError("Either service_id or service_ids must be provided")
         return self
 
-    model_config = ConfigDict(json_schema_extra={
-        "example": {
-            "artisan_id": "123e4567-e89b-12d3-a456-426614174000",
-            "service_id": 1,
-            "service_ids": [1, 2],
-            "job_description": "Need plumbing repair in kitchen",
-            "job_date": "2025-02-15T10:00:00Z",
-            "job_address": "123 Main Street, Lagos, Nigeria",
-            "job_latitude": 6.5244,
-            "job_longitude": 3.3792,
-            "budget_min": 5000.00,
-            "budget_max": 10000.00
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "artisan_id": "123e4567-e89b-12d3-a456-426614174000",
+                "service_id": 1,
+                "service_ids": [1, 2],
+                "job_description": "Need plumbing repair in kitchen",
+                "job_date": "2025-02-15T10:00:00Z",
+                "job_address": "123 Main Street, Lagos, Nigeria",
+                "job_latitude": 6.5244,
+                "job_longitude": 3.3792,
+                "budget_min": 5000.00,
+                "budget_max": 10000.00,
+            }
         }
-    })
+    )
 
 
 class AcceptBookingRequest(BaseModel):
     """Request schema for artisan accepting a booking"""
+
     agreed_amount: Decimal = Field(..., ge=0, decimal_places=2)
 
-    model_config = ConfigDict(json_schema_extra={
-        "example": {
-            "agreed_amount": 7500.00
-        }
-    })
+    model_config = ConfigDict(json_schema_extra={"example": {"agreed_amount": 7500.00}})
 
 
 class RejectBookingRequest(BaseModel):
     """Request schema for artisan rejecting a booking"""
+
     rejection_reason: str = Field(..., min_length=10, max_length=500)
 
-    model_config = ConfigDict(json_schema_extra={
-        "example": {
-            "rejection_reason": "I am not available on the requested date"
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {"rejection_reason": "I am not available on the requested date"}
         }
-    })
+    )
 
 
 class CancelBookingRequest(BaseModel):
     """Request schema for customer cancelling a booking"""
+
     cancellation_reason: str = Field(..., min_length=10, max_length=500)
 
-    model_config = ConfigDict(json_schema_extra={
-        "example": {
-            "cancellation_reason": "Changed my mind about the service"
-        }
-    })
+    model_config = ConfigDict(
+        json_schema_extra={"example": {"cancellation_reason": "Changed my mind about the service"}}
+    )
 
 
 class CompleteBookingRequest(BaseModel):
     """Request schema for artisan completing a booking"""
+
     completion_notes: Optional[str] = Field(None, max_length=1000)
     completion_images: Optional[List[str]] = Field(None, max_items=10)
 
-    @field_validator('completion_images')
+    @field_validator("completion_images")
     @classmethod
     def validate_images(cls, v):
         if v:
             for url in v:
-                if not url.startswith('http://') and not url.startswith('https://'):
-                    raise ValueError('All image URLs must be valid HTTP/HTTPS URLs')
+                if not url.startswith("http://") and not url.startswith("https://"):
+                    raise ValueError("All image URLs must be valid HTTP/HTTPS URLs")
         return v
 
-    model_config = ConfigDict(json_schema_extra={
-        "example": {
-            "completion_notes": "Job completed successfully. Fixed the leak and replaced pipes.",
-            "completion_images": [
-                "https://res.cloudinary.com/workchop/image/upload/v1234/completion1.jpg",
-                "https://res.cloudinary.com/workchop/image/upload/v1234/completion2.jpg"
-            ]
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "completion_notes": "Job completed successfully. Fixed the leak and replaced pipes.",  # noqa: E501
+                "completion_images": [
+                    "https://res.cloudinary.com/workchop/image/upload/v1234/completion1.jpg",
+                    "https://res.cloudinary.com/workchop/image/upload/v1234/completion2.jpg",
+                ],
+            }
         }
-    })
+    )
 
 
 class NegotiateBookingRequest(BaseModel):
     """Request schema for starting/countering booking negotiation"""
+
     negotiated_amount: Decimal = Field(..., gt=0, decimal_places=2)
     negotiation_condition: str = Field(..., min_length=5, max_length=500)
 
-    model_config = ConfigDict(json_schema_extra={
-        "example": {
-            "negotiated_amount": 10000.00,
-            "negotiation_condition": "Distance and material transport cost are higher."
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "negotiated_amount": 10000.00,
+                "negotiation_condition": "Distance and material transport cost are higher.",
+            }
         }
-    })
+    )
 
 
 class NegotiateResponseRequest(BaseModel):
     """Request schema for client negotiation response"""
+
     action: str = Field(..., pattern="^(agree|counter|decline)$")
     negotiated_amount: Optional[Decimal] = Field(None, gt=0, decimal_places=2)
     negotiation_condition: Optional[str] = Field(None, min_length=5, max_length=500)
@@ -160,28 +168,32 @@ class NegotiateResponseRequest(BaseModel):
     def validate_counter_amount(cls, v):
         return v
 
-    model_config = ConfigDict(json_schema_extra={
-        "example": {
-            "action": "counter",
-            "negotiated_amount": 9000.00,
-            "negotiation_condition": "Let's meet halfway due to budget limits."
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "action": "counter",
+                "negotiated_amount": 9000.00,
+                "negotiation_condition": "Let's meet halfway due to budget limits.",
+            }
         }
-    })
+    )
 
 
 class DisputeCompletionRequest(BaseModel):
     """Request schema for customer disputing completion"""
+
     dispute_reason: str = Field(..., min_length=10, max_length=500)
 
-    model_config = ConfigDict(json_schema_extra={
-        "example": {
-            "dispute_reason": "Job was marked complete but issue is not fixed yet."
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {"dispute_reason": "Job was marked complete but issue is not fixed yet."}
         }
-    })
+    )
 
 
 class CreateBookingProgressLogRequest(BaseModel):
     """Request schema for artisan progress logging."""
+
     description: str = Field(..., min_length=5, max_length=1000)
 
     @field_validator("description")
@@ -192,6 +204,7 @@ class CreateBookingProgressLogRequest(BaseModel):
 
 class BookingProgressLogResponse(BaseModel):
     """Response schema for booking progress logs."""
+
     id: int
     booking_id: int
     artisan_id: UUID
@@ -204,6 +217,7 @@ class BookingProgressLogResponse(BaseModel):
 
 class BookingResponse(BaseModel):
     """Response schema for booking details"""
+
     id: int
     booking_reference: str
     customer_id: UUID
@@ -262,6 +276,7 @@ class BookingResponse(BaseModel):
 
 class BookingListResponse(BaseModel):
     """Response schema for list of bookings"""
+
     bookings: List[BookingResponse]
     total: int
     page: int
@@ -270,6 +285,7 @@ class BookingListResponse(BaseModel):
 
 class BookingStatsResponse(BaseModel):
     """Response schema for booking statistics"""
+
     total_bookings: int
     pending_bookings: int
     accepted_bookings: int
