@@ -8,6 +8,7 @@ from app.db.models.artisan_profile import ArtisanProfile, AvailabilityStatus
 from app.db.models.portfolio import Portfolio
 from app.db.models.booking import Booking, BookingStatus
 from app.db.models.payment import Payment, PaymentStatus, PaymentMethod
+from app.db.models.withdrawal import Withdrawal, WithdrawalStatus
 from app.db.models.review import Review
 from app.db.models.booking_progress_log import BookingProgressLog
 from app.db.models.push_device import PushDevice, PushPlatform
@@ -30,6 +31,8 @@ __all__ = [
     "Payment",
     "PaymentStatus",
     "PaymentMethod",
+    "Withdrawal",
+    "WithdrawalStatus",
     "Review",
     "BookingProgressLog",
     "PushDevice",

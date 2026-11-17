@@ -12,6 +12,7 @@ celery_app = Celery(
     include=[
         "app.tasks.email_tasks",
         "app.tasks.notification_tasks",
+        "app.tasks.booking_tasks",
     ],
 )
 
@@ -40,6 +41,11 @@ celery_app.conf.beat_schedule = {
     # Example: Clean up expired OTPs every hour
     "cleanup-expired-otps": {
         "task": "app.tasks.email_tasks.cleanup_expired_otps",
+        "schedule": 3600.0,  # Every hour
+    },
+    # Confirm completed jobs the client never confirmed/disputed within the window
+    "auto-confirm-completed-bookings": {
+        "task": "app.tasks.booking_tasks.auto_confirm_completed_bookings",
         "schedule": 3600.0,  # Every hour
     },
 }

@@ -14,6 +14,7 @@ from app.db.models.user import User, UserType
 from app.db.models.booking import Booking, BookingStatus
 from app.db.models.review import Review
 from app.db.models.artisan_profile import ArtisanProfile
+from app.services.notify import notify_user as _notify_user
 from app.schemas.review import (
     CreateReviewRequest,
     RespondToReviewRequest,
@@ -123,7 +124,16 @@ async def create_review(
     db.commit()
     db.refresh(review)
 
-    # TODO: Send notification to artisan
+    _notify_user(
+        booking.artisan_id,
+        "New review",
+        f"You received a {request.rating:g}-star review.",
+        {
+            "booking_id": str(booking.id),
+            "review_id": str(review.id),
+            "event": "review_received",
+        },
+    )
 
     # Prepare response with user details
     response = ReviewResponse.model_validate(review)
@@ -285,7 +295,12 @@ async def respond_to_review(
     db.commit()
     db.refresh(review)
 
-    # TODO: Send notification to customer
+    _notify_user(
+        review.customer_id,
+        "Artisan responded to your review",
+        f"{current_user.full_name} replied to your review.",
+        {"review_id": str(review.id), "event": "review_response"},
+    )
 
     # Prepare response
     customer = db.query(User).filter(User.id == review.customer_id).first()

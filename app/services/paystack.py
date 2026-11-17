@@ -15,6 +15,20 @@ class PaystackError(Exception):
         self.status_code = status_code
 
 
+def _raise_for_http_error(response, default_message: str) -> None:
+    """Raise PaystackError carrying the HTTP status so callers can tell definitive
+    rejections (4xx) from ambiguous failures (5xx / network errors)."""
+    if response.status_code >= 400:
+        try:
+            message = response.json().get("message") or default_message
+        except Exception:
+            message = default_message
+        raise PaystackError(
+            f"Paystack error ({response.status_code}): {message}",
+            status_code=response.status_code,
+        )
+
+
 class PaystackService:
     """
     Service class for Paystack payment gateway integration.
@@ -213,7 +227,7 @@ class PaystackService:
                 headers=cls._get_headers(),
                 timeout=30
             )
-            response.raise_for_status()
+            _raise_for_http_error(response, "Recipient creation failed")
             data = response.json()
 
             if not data.get("status"):
@@ -264,11 +278,14 @@ class PaystackService:
                 headers=cls._get_headers(),
                 timeout=30
             )
-            response.raise_for_status()
+            _raise_for_http_error(response, "Transfer initiation failed")
             data = response.json()
 
             if not data.get("status"):
-                raise PaystackError(data.get("message", "Transfer initiation failed"))
+                raise PaystackError(
+                    data.get("message", "Transfer initiation failed"),
+                    status_code=response.status_code,
+                )
 
             return data["data"]
 

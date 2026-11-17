@@ -25,6 +25,13 @@ class PaymentMethod(str, enum.Enum):
     BANK_TRANSFER = "bank_transfer"
     USSD = "ussd"
     BANK_ACCOUNT = "bank_account"
+    # Additional Paystack channels (the column is VARCHAR(20), so no DB migration is needed)
+    BANK = "bank"
+    MOBILE_MONEY = "mobile_money"
+    QR = "qr"
+    EFT = "eft"
+    APPLE_PAY = "apple_pay"
+    OTHER = "other"  # safe fallback for channels we do not recognise
 
 
 class Payment(Base):
@@ -88,12 +95,21 @@ class Payment(Base):
     payout_reference = Column(String(255), unique=True, nullable=True, index=True)
     payout_response = Column(Text, nullable=True)  # JSON payout response
 
+    # Withdrawal this payment is part of (NULL = still available balance)
+    withdrawal_id = Column(
+        Integer,
+        ForeignKey("withdrawals.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     # Relationships
     booking = relationship("Booking", back_populates="payment")
+    withdrawal = relationship("Withdrawal", back_populates="payments")
 
     def __repr__(self):
         return f"<Payment {self.payment_reference} ({self.status})>"

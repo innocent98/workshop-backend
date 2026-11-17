@@ -18,6 +18,7 @@ def import_models():
         Booking,
         BookingProgressLog,
         Payment,
+        Withdrawal,
         Review,
         PushDevice,
         UserNotification,
