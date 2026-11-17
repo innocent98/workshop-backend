@@ -31,7 +31,8 @@ from app.db.models.user import User
 from app.db.models.withdrawal import Withdrawal, WithdrawalStatus
 from app.services.notify import notify_user
 from app.services.payment_service import naira_to_kobo
-from app.services.paystack import PaystackError, PaystackService
+from app.services.payout import get_payout_provider
+from app.services.provider_errors import ProviderError
 
 GENERIC_PAYSTACK_ERROR = "We could not start your withdrawal right now. Please try again later."
 ACCOUNT_VERIFY_ERROR = (
@@ -215,20 +216,20 @@ def request_withdrawal(
 
     # Stateless Paystack calls (no DB locks held while we wait on the network).
     try:
-        verification = PaystackService.verify_account_number(
+        verification = get_payout_provider().resolve_account(
             account_number=account_number, bank_code=bank_code
         )
-    except PaystackError as exc:
+    except ProviderError as exc:
         logger.warning(f"Payout account verification failed for artisan {artisan_id}: {exc}")
         raise WithdrawalError(400, ACCOUNT_VERIFY_ERROR)
     verified_name = verification.get("account_name") or account_name
 
     try:
-        recipient = PaystackService.create_transfer_recipient(
+        recipient = get_payout_provider().create_recipient(
             name=verified_name, account_number=account_number, bank_code=bank_code
         )
         recipient_code = recipient.get("recipient_code")
-    except PaystackError as exc:
+    except ProviderError as exc:
         logger.error(f"Paystack recipient creation failed for artisan {artisan_id}: {exc}")
         raise WithdrawalError(502, GENERIC_PAYSTACK_ERROR)
     if not recipient_code:
@@ -323,13 +324,13 @@ def _initiate_transfer(db: Session, withdrawal_id: int) -> WithdrawalResult:
     count = db.query(func.count(Payment.id)).filter(Payment.withdrawal_id == withdrawal_id).scalar()
     reference = withdrawal.reference
     try:
-        transfer = PaystackService.initiate_transfer(
+        transfer = get_payout_provider().transfer(
             recipient_code=withdrawal.recipient_code,
             amount=withdrawal.amount,
             reason="Workchop payout",
             reference=reference,
         )
-    except PaystackError as exc:
+    except ProviderError as exc:
         logger.error(f"Paystack transfer initiation failed for {reference}: {exc}")
         if exc.status_code is not None and 400 <= exc.status_code < 500:
             # Definitive rejection: nothing was sent, give the money back.
@@ -555,8 +556,8 @@ def reconcile_processing_withdrawals(db: Session, now: Optional[datetime] = None
 
     for withdrawal_id, reference in rows:
         try:
-            data = PaystackService.verify_transfer(reference)
-        except PaystackError as exc:
+            data = get_payout_provider().verify_transfer(reference)
+        except ProviderError as exc:
             if exc.status_code == 404:
                 logger.error(
                     f"Withdrawal {reference}: transfer does not exist at Paystack, failing"

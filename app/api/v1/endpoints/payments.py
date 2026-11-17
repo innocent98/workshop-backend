@@ -1,12 +1,12 @@
 """
-Payment endpoints for managing Paystack transactions.
+Payment endpoints for managing escrow holds (the provider is chosen by ESCROW_PROVIDER).
 """
 
 import json
 from decimal import Decimal
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
@@ -26,6 +26,16 @@ from app.schemas.payment import (
     VerifyPaymentResponse,
 )
 from app.services.admin import handle_refund_event
+from app.services.escrow import get_escrow_provider
+from app.services.escrow.base import (
+    HoldFailed,
+    HoldFunded,
+    Ignored,
+    PayoutFailed,
+    PayoutSucceeded,
+    RefundUpdated,
+    WebhookRejected,
+)
 from app.services.payment_service import (
     OUTCOME_ALREADY,
     OUTCOME_MISMATCH,
@@ -35,16 +45,13 @@ from app.services.payment_service import (
     archive_payment_reference,
     find_payment_by_reference,
 )
-from app.services.paystack import PaystackError, PaystackService
+from app.services.provider_errors import DuplicateReferenceError, ProviderError
 from app.services.withdrawal_service import settle_transfer_failure, settle_transfer_success
 from app.tasks.notification_tasks import send_push_notification
 from app.utils.commission import calculate_artisan_amount, calculate_platform_fee
 from app.utils.payment_reference import generate_payment_reference
 
 router = APIRouter()
-
-# Paystack transaction statuses that are final failures (everything else may still succeed).
-TERMINAL_FAILURE_STATUSES = {"failed", "reversed"}
 
 
 def _payment_split(gross_amount: Decimal) -> tuple[Decimal, Decimal]:
@@ -147,39 +154,29 @@ def initialize_payment(
                 "created_at": existing_payment.created_at,
             }
 
-    # Prepare metadata
-    metadata = {
-        "booking_id": booking.id,
-        "booking_reference": booking.booking_reference,
-        "customer_id": str(booking.customer_id),
-        "artisan_id": str(booking.artisan_id),
-        "service_id": booking.service_id,
-    }
-
     try:
-        # Initialize transaction with Paystack.
+        # Start the hold with the escrow provider.
         # Retry with a fresh reference if upstream reports duplicate reference.
-        paystack_response = None
+        escrow = get_escrow_provider()
+        checkout = None
         payment_reference = None
-        last_paystack_error = None
+        last_provider_error = None
         for _ in range(3):
             payment_reference = generate_payment_reference(db)
             try:
-                paystack_response = PaystackService.initialize_transaction(
-                    email=current_user.email,
+                checkout = escrow.initiate_hold(
+                    booking=booking,
                     amount=booking.agreed_amount,
+                    customer_email=current_user.email,
                     reference=payment_reference,
-                    metadata=metadata,
                 )
                 break
-            except PaystackError as e:
-                last_paystack_error = e
-                if "Duplicate Transaction Reference" in str(e):
-                    continue
-                raise
+            except DuplicateReferenceError as e:
+                last_provider_error = e
+                continue
 
-        if paystack_response is None:
-            raise last_paystack_error or PaystackError("Transaction initialization failed")
+        if checkout is None:
+            raise last_provider_error or ProviderError("Transaction initialization failed")
 
         platform_fee, artisan_amount = _payment_split(booking.agreed_amount)
 
@@ -191,9 +188,9 @@ def initialize_payment(
             # keep the old reference(s): a late charge.success for them must still find this payment
             archive_payment_reference(db, existing_payment)
             existing_payment.payment_reference = payment_reference
-            existing_payment.paystack_reference = paystack_response.get("reference")
-            existing_payment.paystack_access_code = paystack_response.get("access_code")
-            existing_payment.authorization_url = paystack_response.get("authorization_url")
+            existing_payment.paystack_reference = checkout.reference
+            existing_payment.paystack_access_code = checkout.access_code
+            existing_payment.authorization_url = checkout.authorization_url
             existing_payment.amount = booking.agreed_amount
             existing_payment.platform_fee = platform_fee
             existing_payment.artisan_amount = artisan_amount
@@ -201,7 +198,7 @@ def initialize_payment(
             existing_payment.status = PaymentStatus.PENDING
             existing_payment.customer_email = current_user.email
             existing_payment.customer_name = current_user.full_name
-            existing_payment.paystack_response = json.dumps(paystack_response)
+            existing_payment.paystack_response = json.dumps(checkout.raw)
             existing_payment.payment_method = None
             existing_payment.paid_at = None
             existing_payment.released_at = None
@@ -214,10 +211,10 @@ def initialize_payment(
             # Create payment record
             payment = Payment(
                 payment_reference=payment_reference,
-                paystack_reference=paystack_response.get("reference"),
-                paystack_access_code=paystack_response.get("access_code"),
+                paystack_reference=checkout.reference,
+                paystack_access_code=checkout.access_code,
                 booking_id=booking.id,
-                authorization_url=paystack_response.get("authorization_url"),
+                authorization_url=checkout.authorization_url,
                 amount=booking.agreed_amount,
                 platform_fee=platform_fee,
                 artisan_amount=artisan_amount,
@@ -225,7 +222,7 @@ def initialize_payment(
                 status=PaymentStatus.PENDING,
                 customer_email=current_user.email,
                 customer_name=current_user.full_name,
-                paystack_response=json.dumps(paystack_response),
+                paystack_response=json.dumps(checkout.raw),
             )
 
             db.add(payment)
@@ -244,7 +241,7 @@ def initialize_payment(
             "created_at": payment.created_at,
         }
 
-    except PaystackError as e:
+    except ProviderError as e:
         mapped_status = (
             status.HTTP_400_BAD_REQUEST
             if e.status_code is not None and 400 <= e.status_code < 500
@@ -295,19 +292,18 @@ def verify_payment(
         }
 
     try:
-        # Verify with Paystack
-        verification_response = PaystackService.verify_transaction(reference)
-    except PaystackError as e:
-        logger.error(f"Paystack verify failed for {reference}: {e}")
+        # Ask the escrow provider where the hold stands.
+        outcome = get_escrow_provider().fetch_status(reference)
+    except ProviderError as e:
+        logger.error(f"Payment provider verify failed for {reference}: {e}")
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Could not verify payment with the payment provider. Please try again.",
         )
 
-    paystack_status = verification_response.get("status")
-    if paystack_status == "success":
+    if isinstance(outcome, HoldFunded):
         # Same settlement function as the webhook: idempotent, amount/currency checked.
-        result = apply_charge_success(db, reference, verification_response)
+        result = apply_charge_success(db, reference, outcome.data)
         db.refresh(payment)
         if result.outcome == OUTCOME_MISMATCH:
             return {
@@ -325,10 +321,10 @@ def verify_payment(
             "message": "Payment verified successfully",
         }
 
-    if paystack_status in TERMINAL_FAILURE_STATUSES:
-        # Only a terminal Paystack status may fail a payment; apply_charge_failed never
+    if isinstance(outcome, HoldFailed):
+        # Only a terminal provider status may fail a payment; apply_charge_failed never
         # regresses a SUCCESS/RELEASED payment.
-        apply_charge_failed(db, reference, verification_response)
+        apply_charge_failed(db, reference, outcome.data)
         db.refresh(payment)
         return {
             "payment_reference": payment.payment_reference,
@@ -349,92 +345,66 @@ def verify_payment(
     }
 
 
-REFUND_WEBHOOK_EVENTS = (
-    "refund.pending",
-    "refund.processing",
-    "refund.processed",
-    "refund.failed",
-)
-
-
-def _handle_webhook_event(db: Session, event: Optional[str], data: dict) -> dict:
+def _handle_webhook_event(db: Session, event) -> dict:
     """Blocking part of the webhook (DB locks, row updates): runs in the threadpool."""
-    if event == "charge.success":
-        reference = data.get("reference")
-        if not reference:
+    if isinstance(event, HoldFunded):
+        if not event.reference:
             return {"status": "ignored", "message": "No reference in payload"}
-        result = apply_charge_success(db, reference, data)
+        result = apply_charge_success(db, event.reference, event.data)
         if result.outcome == OUTCOME_NOT_FOUND:
             return {"status": "ignored", "message": "Payment not found"}
         if result.outcome == OUTCOME_MISMATCH:
-            # 200 so Paystack stops retrying; the mismatch is logged for manual review.
+            # 200 so the provider stops retrying; the mismatch is logged for manual review.
             return {"status": "ignored", "message": "Amount or currency mismatch"}
         if result.outcome == OUTCOME_ALREADY:
             return {"status": "success", "message": "Payment already processed"}
         return {"status": "success", "message": "Payment processed"}
 
-    if event == "charge.failed":
-        reference = data.get("reference")
-        if not reference:
+    if isinstance(event, HoldFailed):
+        if not event.reference:
             return {"status": "ignored", "message": "No reference in payload"}
-        result = apply_charge_failed(db, reference, data)
+        result = apply_charge_failed(db, event.reference, event.data)
         if result.outcome == OUTCOME_NOT_FOUND:
             return {"status": "ignored", "message": "Payment not found"}
         return {"status": "success", "message": "Payment failure recorded"}
 
-    if event == "transfer.success":
-        outcome = settle_transfer_success(db, data)
+    if isinstance(event, PayoutSucceeded):
+        outcome = settle_transfer_success(db, event.data)
         return {"status": "success", "message": f"Transfer {outcome}"}
 
-    if event in ("transfer.failed", "transfer.reversed"):
-        new_status = (
-            WithdrawalStatus.FAILED if event == "transfer.failed" else WithdrawalStatus.REVERSED
-        )
-        outcome = settle_transfer_failure(db, data, new_status)
+    if isinstance(event, PayoutFailed):
+        new_status = WithdrawalStatus.REVERSED if event.reversed else WithdrawalStatus.FAILED
+        outcome = settle_transfer_failure(db, event.data, new_status)
         return {"status": "success", "message": f"Transfer {outcome}"}
 
-    if event in REFUND_WEBHOOK_EVENTS:
+    if isinstance(event, RefundUpdated):
         # Async refund lifecycle of an admin dispute resolution (app/services/admin.py).
-        refund_status = handle_refund_event(db, event, data)
+        refund_status = handle_refund_event(db, event.event, event.data)
         if refund_status is None:
             return {"status": "ignored", "message": "Refund not found"}
         return {"status": "success", "message": f"Refund {refund_status}"}
 
-    return {"status": "ignored", "message": f"Unhandled event: {event}"}
+    name = event.event if isinstance(event, Ignored) else None
+    return {"status": "ignored", "message": f"Unhandled event: {name}"}
 
 
 @router.post("/webhook", status_code=status.HTTP_200_OK)
-async def paystack_webhook(
-    request: Request,
-    x_paystack_signature: Optional[str] = Header(None),
-    db: Session = Depends(get_db),
-):
+async def paystack_webhook(request: Request, db: Session = Depends(get_db)):
     """
-    Paystack webhook handler.
+    Escrow provider webhook handler (Paystack today).
 
-    Processes payment notifications from Paystack.
-    No authentication required (verified via signature).
+    Processes payment notifications from the provider.
+    No authentication required (verified via the provider's signature).
     """
     # Get raw body for signature verification
     body = await request.body()
 
-    # Verify webhook signature
-    if not x_paystack_signature or not PaystackService.verify_webhook_signature(
-        x_paystack_signature, body
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid webhook signature"
-        )
-
-    # Parse webhook payload
     try:
-        payload = json.loads(body)
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON payload")
+        event = get_escrow_provider().verify_and_parse_webhook(request.headers, body)
+    except WebhookRejected as rejected:
+        raise HTTPException(status_code=rejected.status_code, detail=rejected.detail)
 
-    event = payload.get("event")
-    data = payload.get("data") or {}
-    return await run_in_threadpool(_handle_webhook_event, db, event, data)
+    return await run_in_threadpool(_handle_webhook_event, db, event)
 
 
 @router.get("/{payment_id}", response_model=PaymentResponse)

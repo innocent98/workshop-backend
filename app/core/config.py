@@ -71,6 +71,10 @@ class Settings(BaseSettings):
     PAYSTACK_WEBHOOK_SECRET: Optional[str] = None
     PAYSTACK_BASE_URL: str = "https://api.paystack.co"
 
+    # Provider seams (see docs/sop/escrow-provider-seam.md). Only "paystack" exists today.
+    ESCROW_PROVIDER: str = "paystack"
+    PAYOUT_PROVIDER: str = "paystack"
+
     # Reverse Geocoding
     REVERSE_GEOCODE_ENABLED: bool = True
     NOMINATIM_BASE_URL: str = "https://nominatim.openstreetmap.org"
