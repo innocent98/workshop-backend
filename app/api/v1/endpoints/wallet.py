@@ -27,7 +27,8 @@ from app.schemas.wallet import (
     VerifyAccountResponse,
     WalletBalanceResponse,
 )
-from app.services.paystack import PaystackError, PaystackService
+from app.services.payout import get_payout_provider
+from app.services.provider_errors import ProviderError
 from app.services.withdrawal_service import (
     WithdrawalError,
     available_balance,
@@ -53,8 +54,8 @@ async def get_supported_banks(
         )
 
     try:
-        banks = PaystackService.get_banks()
-    except PaystackError as e:
+        banks = get_payout_provider().list_banks()
+    except ProviderError as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch banks: {str(e)}",
@@ -91,10 +92,10 @@ async def verify_bank_account(
         )
 
     try:
-        verification = PaystackService.verify_account_number(
+        verification = get_payout_provider().resolve_account(
             account_number=request.account_number, bank_code=request.bank_code
         )
-    except PaystackError as e:
+    except ProviderError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
     return {

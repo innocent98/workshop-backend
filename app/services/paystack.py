@@ -6,15 +6,11 @@ from typing import Dict, Optional
 import requests
 
 from app.core.config import settings
+from app.services.provider_errors import ProviderError
 
 
-class PaystackError(Exception):
+class PaystackError(ProviderError):
     """Custom exception for Paystack API errors"""
-
-    def __init__(self, message: str, status_code: Optional[int] = None):
-        super().__init__(message)
-        self.message = message
-        self.status_code = status_code
 
 
 def _raise_for_http_error(response, default_message: str) -> None:

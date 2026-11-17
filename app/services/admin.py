@@ -20,8 +20,9 @@ from app.db.models.booking import Booking, BookingStatus
 from app.db.models.payment import Payment, PaymentStatus
 from app.db.models.user import User, UserType
 from app.schemas.admin import AdminArtisanVerificationResponse, ResolveDisputeResponse
+from app.services.escrow import get_escrow_provider
 from app.services.notify import notify_user
-from app.services.paystack import PaystackError, PaystackService
+from app.services.provider_errors import ProviderError
 
 
 def _err(code: str, message: str, http_status: int) -> HTTPException:
@@ -297,12 +298,13 @@ def _run_refund(db: Session, admin: User, booking_id: int) -> ResolveDisputeResp
 
     data: Optional[dict] = None
     try:
-        data = PaystackService.refund(
+        data = get_escrow_provider().refund(
             reference,
+            idempotency_key=f"refund-booking-{booking_id}",
             customer_note="Refund for a disputed booking",
             merchant_note=f"Dispute resolution for booking {booking_ref}",
         )
-    except PaystackError as exc:
+    except ProviderError as exc:
         logger.error(f"Refund call failed booking={booking_id}: {exc.message[:200]}")
         definite = (
             exc.status_code is not None
@@ -310,8 +312,8 @@ def _run_refund(db: Session, admin: User, booking_id: int) -> ResolveDisputeResp
             and exc.status_code not in (408, 429)
         )
         try:
-            data = _find_refund(PaystackService.list_refunds(reference))
-        except PaystackError:
+            data = _find_refund(get_escrow_provider().list_refunds(reference))
+        except ProviderError:
             raise _err(
                 "refund_unconfirmed",
                 "Could not confirm the refund with Paystack. The refund is recorded as requested, "
@@ -581,8 +583,8 @@ def _accepted_event_is_confirmed(data: dict, tx: str) -> bool:
     (non-failed) refund for the transaction, matching the event's refund id when it has one. If the
     lookup fails nothing changes: the row stays and release stays blocked."""
     try:
-        refunds = PaystackService.list_refunds(tx)
-    except PaystackError:
+        refunds = get_escrow_provider().list_refunds(tx)
+    except ProviderError:
         logger.warning("refund event not adopted: could not confirm with Paystack")
         return False
     event_id = data.get("id")
@@ -612,8 +614,8 @@ def _failed_event_is_confirmed(record: DisputeResolution, data: dict, tx: str) -
         logger.info(f"Ignoring refund.failed for superseded refund {event_id}")
         return False
     try:
-        live = _find_refund(PaystackService.list_refunds(tx))
-    except PaystackError:
+        live = _find_refund(get_escrow_provider().list_refunds(tx))
+    except ProviderError:
         logger.warning("refund.failed not applied: could not confirm with Paystack")
         return False
     if live is not None:
