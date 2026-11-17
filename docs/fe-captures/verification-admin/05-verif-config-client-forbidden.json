@@ -1,0 +1,11 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/profiles/artisans/me/verification/config",
+    "body": null
+  },
+  "status": 403,
+  "response": {
+    "detail": "Only artisans can access this endpoint"
+  }
+}

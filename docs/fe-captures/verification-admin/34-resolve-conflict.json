@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/admin/bookings/1/resolve-dispute",
+    "body": {
+      "resolution": "refund_customer",
+      "note": "xxx"
+    }
+  },
+  "status": 409,
+  "response": {
+    "detail": {
+      "code": "already_resolved",
+      "message": "This dispute was already resolved as 'release_to_artisan'."
+    }
+  },
+  "note": "different resolution after the fact"
+}

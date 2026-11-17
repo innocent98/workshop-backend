@@ -1,0 +1,24 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/admin/bookings/1/resolve-dispute",
+    "body": {
+      "resolution": "release_to_artisan",
+      "note": "Photos show the sink replaced"
+    }
+  },
+  "status": 200,
+  "response": {
+    "booking_id": 1,
+    "booking_status": "completed",
+    "resolution": "release_to_artisan",
+    "note": "Photos show the sink replaced",
+    "resolved_by": "d926fed1-790a-4cac-bfed-1ffa63e4c80d",
+    "resolved_at": "2026-11-17T13:18:17.110254Z",
+    "payment_status": "success",
+    "refund_reference": null,
+    "refund_status": null,
+    "already_resolved": true
+  },
+  "note": "same resolution again: idempotent"
+}

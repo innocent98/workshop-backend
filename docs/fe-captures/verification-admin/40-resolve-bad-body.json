@@ -1,0 +1,36 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/admin/bookings/1/resolve-dispute",
+    "body": null
+  },
+  "status": 422,
+  "response": {
+    "detail": [
+      {
+        "type": "literal_error",
+        "loc": [
+          "body",
+          "resolution"
+        ],
+        "msg": "Input should be 'release_to_artisan' or 'refund_customer'",
+        "input": "nope",
+        "ctx": {
+          "expected": "'release_to_artisan' or 'refund_customer'"
+        }
+      },
+      {
+        "type": "string_too_short",
+        "loc": [
+          "body",
+          "note"
+        ],
+        "msg": "String should have at least 3 characters",
+        "input": "",
+        "ctx": {
+          "min_length": 3
+        }
+      }
+    ]
+  }
+}

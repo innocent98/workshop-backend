@@ -9,9 +9,12 @@ Base = declarative_base()
 def import_models():
     from app.db.models import (  # noqa: F401
         OTP,
+        AdminAuditLog,
         ArtisanProfile,
+        ArtisanVerificationRecord,
         Booking,
         BookingProgressLog,
+        DisputeResolution,
         PasswordResetToken,
         Payment,
         PaymentReference,

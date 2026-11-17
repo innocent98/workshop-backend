@@ -1,0 +1,15 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/profiles/artisans/me/verification/config",
+    "body": null
+  },
+  "status": 200,
+  "response": {
+    "configured": true,
+    "app_id": "capture-app-id",
+    "public_key": "capture-public-key",
+    "widget_id": "capture-nin-widget",
+    "environment": "sandbox"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/profiles/artisans/me/verification/confirm",
+    "body": {
+      "reference_id": "WC-NIN-doesnotexist"
+    }
+  },
+  "status": 404,
+  "response": {
+    "detail": {
+      "code": "unknown_reference",
+      "message": "No verification found for that reference"
+    }
+  }
+}

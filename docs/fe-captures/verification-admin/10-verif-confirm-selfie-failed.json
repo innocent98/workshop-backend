@@ -1,0 +1,25 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/profiles/artisans/me/verification/confirm",
+    "body": {
+      "reference_id": "WC-NIN-1cf04fc37c1e8825"
+    }
+  },
+  "status": 200,
+  "response": {
+    "verification_status": "failed",
+    "is_verified": false,
+    "verified_at": null,
+    "verification_method": null,
+    "failure_reason": "Your selfie did not match the photo on record for this NIN. Retake it in good light, facing the camera, with no hat or glasses.",
+    "nin_last4": null,
+    "reference_id": "WC-NIN-1cf04fc37c1e8825",
+    "attempts_used": 1,
+    "attempts_remaining": 4,
+    "max_attempts": 5,
+    "window_hours": 24,
+    "retry_available_at": null
+  },
+  "note": "Dojah says Failed + selfie.status=false"
+}

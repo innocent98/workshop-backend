@@ -1,0 +1,22 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/profiles/artisans/me/verification/status",
+    "body": null
+  },
+  "status": 200,
+  "response": {
+    "verification_status": "unverified",
+    "is_verified": false,
+    "verified_at": null,
+    "verification_method": null,
+    "failure_reason": null,
+    "nin_last4": null,
+    "reference_id": null,
+    "attempts_used": 0,
+    "attempts_remaining": 5,
+    "max_attempts": 5,
+    "window_hours": 24,
+    "retry_available_at": null
+  }
+}

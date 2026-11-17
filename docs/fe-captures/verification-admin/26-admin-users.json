@@ -1,0 +1,55 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/admin/users?page=1&page_size=3",
+    "body": null
+  },
+  "status": 200,
+  "response": {
+    "items": [
+      {
+        "id": "dc5cc74d-8d61-4b0c-a864-b38a796400a4",
+        "full_name": "Demo Customer",
+        "email": "client@example.com",
+        "phone_number": "+2348000000004",
+        "user_type": "client",
+        "is_active": true,
+        "is_admin": false,
+        "is_email_verified": true,
+        "created_at": "2026-11-17T13:18:15.078345Z",
+        "is_verified": null,
+        "verification_status": null
+      },
+      {
+        "id": "ff166d8a-d62a-4d5f-84ce-32df24db15ac",
+        "full_name": "Third Artisan",
+        "email": "artisan3@example.com",
+        "phone_number": "+2348000000005",
+        "user_type": "artisan",
+        "is_active": true,
+        "is_admin": false,
+        "is_email_verified": true,
+        "created_at": "2026-11-17T13:18:14.824378Z",
+        "is_verified": false,
+        "verification_status": "pending"
+      },
+      {
+        "id": "c3d4ec4b-5d56-44ee-a383-0cdc9b756068",
+        "full_name": "Second Artisan",
+        "email": "artisan2@example.com",
+        "phone_number": "+2348000000003",
+        "user_type": "artisan",
+        "is_active": true,
+        "is_admin": false,
+        "is_email_verified": true,
+        "created_at": "2026-11-17T13:18:14.570003Z",
+        "is_verified": true,
+        "verification_status": "verified"
+      }
+    ],
+    "total": 5,
+    "page": 1,
+    "page_size": 3,
+    "pages": 2
+  }
+}

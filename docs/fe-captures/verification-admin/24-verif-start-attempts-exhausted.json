@@ -1,0 +1,15 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/profiles/artisans/me/verification/start",
+    "body": null
+  },
+  "status": 429,
+  "response": {
+    "detail": {
+      "code": "attempts_exhausted",
+      "message": "Too many verification attempts. Please try again later.",
+      "retry_available_at": "2026-11-18T13:18:16.915885+00:00"
+    }
+  }
+}

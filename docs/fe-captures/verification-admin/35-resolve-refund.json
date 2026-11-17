@@ -1,0 +1,24 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/admin/bookings/2/resolve-dispute",
+    "body": {
+      "resolution": "refund_customer",
+      "note": "Artisan never showed up"
+    }
+  },
+  "status": 200,
+  "response": {
+    "booking_id": 2,
+    "booking_status": "cancelled",
+    "resolution": "refund_customer",
+    "note": "Artisan never showed up",
+    "resolved_by": "d926fed1-790a-4cac-bfed-1ffa63e4c80d",
+    "resolved_at": "2026-11-17T13:18:17.154096Z",
+    "payment_status": "refunded",
+    "refund_reference": "3141592",
+    "refund_status": "pending",
+    "already_resolved": false
+  },
+  "note": "Paystack POST /refund is STUBBED in capture_server.py (needs a real transaction): NOT VERIFIED LIVE against Paystack"
+}
