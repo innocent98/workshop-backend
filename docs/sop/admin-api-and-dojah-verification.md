@@ -37,8 +37,9 @@ Paystack (`GET /refund?transaction=`) and adopts an existing non-failed refund; 
 rejection rolls the intent back (`refund_failed`); anything else keeps the intent (`refund_unconfirmed`, retry
 reconciles first). Paystack refunds are asynchronous, so `handle_refund_event` applies `refund.pending|processing|
 processed|failed` (never moves backwards; `processed` is final; `failed` puts payment back to `success` and the
-booking back to `disputed` so the admin can retry or release). **The webhook route wiring is not done yet**: the
-Paystack webhook handler lives in `payments.py`, owned by the payments PR; wire it after that merges. Residual risk:
+booking back to `disputed` so the admin can retry or release). The events are wired into the Paystack
+webhook in `payments.py` (`REFUND_WEBHOOK_EVENTS` in `_handle_webhook_event`, signature-checked like every event; an
+unknown transaction is acknowledged as `ignored`). Residual risk:
 two admins retrying simultaneously can both call Paystack; Paystack rejects the second ("already reversed") and
 reconciliation adopts the first.
 
@@ -86,7 +87,7 @@ provider. It was replaced by the widget flow on the owner's decision; no trace o
 
 | Area | Files |
 |---|---|
-| Models / migration | `app/db/models/{user,artisan_profile,admin,verification_record}.py`, `alembic/versions/b8e1c4a7d2f3_add_admin_and_artisan_verification.py` (down_revision `f7b8c9d0e1f2`) |
+| Models / migration | `app/db/models/{user,artisan_profile,admin,verification_record}.py`, `alembic/versions/b8e1c4a7d2f3_add_admin_and_artisan_verification.py` (down_revision `c8a1d2e3f4b5`, the payments withdrawals migration: single linear head) |
 | Guard | `app/api/deps.py` (`require_admin`) |
 | Admin API | `app/api/v1/endpoints/admin.py`, `app/services/admin.py`, `app/schemas/admin.py`, mounted in `app/api/v1/api.py` |
 | Refund | `app/services/paystack.py` (`PaystackService.refund`) |
@@ -98,7 +99,7 @@ provider. It was replaced by the widget flow on the owner's decision; no trace o
 
 ## Verification
 
-* `tests/admin/` (143 tests, scratch PostGIS 15): non-admin/artisan/anonymous 403 on every admin route, `page_size`
+* `tests/admin/` (147 tests, scratch PostGIS 15): non-admin/artisan/anonymous 403 on every admin route, `page_size`
   cap, filters, LIKE-wildcard escaping, dispute release, refund with a faked Paystack, **refund safety** (intent committed before the Paystack call, timeout
   reconciled to an existing refund, unconfirmed refund blocks release, retry, definite rejection rolls back, commit
   failure after Paystack success cannot lead to a release, `refund.*` events, `PaystackService.refund/list_refunds`),
@@ -135,23 +136,18 @@ subscribe the webhook (`POST /api/v1/webhook/subscribe` or Developers > Webhooks
 `https://<api-host>/api/v1/verification/webhook`; the secret shown there is `DOJAH_WEBHOOK_SECRET` (not the API key).
 Sandbox keys only work on the sandbox host.
 
-Rollback: `alembic downgrade f7b8c9d0e1f2` drops the new tables/columns (verification history and admin audit rows
+Rollback: `alembic downgrade c8a1d2e3f4b5` drops the new tables/columns (verification history and admin audit rows
 are lost). Code rollback alone is safe: the new columns have defaults.
 
 ## Follow-ups
 
-* **Refund events not wired:** call `handle_refund_event(db, event, data)` from the Paystack webhook handler in
-  `payments.py` for `refund.*` events (after the payments PR merges). The event payload keys it reads
-  (`transaction_reference` or `transaction.reference`, `id`, `status`) are NOT verified against a live webhook.
+* The `refund.*` payload keys `handle_refund_event` reads (`transaction_reference` or `transaction.reference`, `id`,
+  `status`) are NOT verified against a live Paystack webhook; confirm on the first real refund.
 * **Legacy artisans (owner default):** artisans verified by the old auto-verify stay verified
   (`verification_method='legacy'`). A re-verification campaign through the widget is a follow-up: listing them is
   `GET /admin/users?user_type=artisan&verification_status=verified` filtered on method `legacy` (a `legacy` filter
   is not built yet), then ask them to verify and decide when the badge for unverified-by-Dojah artisans is retired.
 * `POST /payments/{id}/release` (owned by the payments work) should now become admin-only using `require_admin`.
-* Migration heads: the payments PR's `c8a1d2e3f4b5` also has `down_revision = f7b8c9d0e1f2`; the second to merge
-  must repoint to the first.
-* Paystack refund then DB-commit failure leaves money refunded but unrecorded; a retry hits Paystack's "already
-  reversed" error. Reconcile manually; add a refund-status webhook handler.
 * First live run with real Dojah keys: confirm response parsing, `nin_last4` availability, webhook secret/headers,
   and that the widget `reference_id` round-trips.
 * Identity binding (raised by the automated security review): a pass proves the person in the selfie owns *some* valid
@@ -161,5 +157,4 @@ are lost). Code rollback alone is safe: the new columns have defaults.
   and/or (b) a keyed HMAC of the NIN in a unique column to refuse duplicates. (b) stores a NIN-derived value, so it needs
   the owner's explicit OK first.
 * Optional hardening: admin audit-log read endpoint; admin web dashboard (deferred).
-* Repo-wide lint (black/isort/flake8) was already failing on `main`; only new files are formatted here. Tests need a
-  PostGIS service + `ENVIRONMENT`/`SERVER_HOST` env in CI (added by the payments PR's `ci.yml`).
+* `tests/admin/` reuses the shared `db`/`client`/`notifications` fixtures from `tests/conftest.py`.

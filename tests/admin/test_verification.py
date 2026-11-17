@@ -231,7 +231,7 @@ def test_confirm_success_verifies_artisan_and_stores_only_last4(
         if c.name != "location"
     ]
     assert NIN_FULL not in " ".join(rows) and "Jane" not in " ".join(rows)
-    assert [n[1] for n in notifications] == ["You're verified"]
+    assert [n["title"] for n in notifications] == ["You're verified"]
 
 
 @pytest.mark.parametrize(
@@ -254,7 +254,7 @@ def test_confirm_failures_set_failed_with_reason(
     assert body["verification_status"] == "failed" and body["is_verified"] is False
     assert fragment in body["failure_reason"]
     assert profile(db).is_verified is False
-    assert [n[1] for n in notifications] == ["Verification failed"]
+    assert [n["title"] for n in notifications] == ["Verification failed"]
     # and the artisan can retry
     assert start(client, h).status_code == 200
 

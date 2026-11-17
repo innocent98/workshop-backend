@@ -12,6 +12,7 @@ from app.db.models.user import UserType
 from app.services.admin import handle_refund_event
 from app.services.paystack import PaystackError, PaystackService
 from tests.admin.conftest import make_booking, make_user
+from tests.conftest import engine
 
 TIMEOUT = PaystackError("Paystack API request failed: timeout")  # no status code: ambiguous
 ALREADY_REVERSED = PaystackError("Transaction has been fully reversed", status_code=400)
@@ -75,13 +76,11 @@ def states(db, booking_id):
 # ------------------------------------------------------- intent before the call
 
 
-def test_refund_intent_is_committed_before_paystack_is_called(
-    client, db, admin_h, disputed, ps, pg_engine
-):
+def test_refund_intent_is_committed_before_paystack_is_called(client, db, admin_h, disputed, ps):
     seen = {}
 
     def peek():
-        with pg_engine.connect() as other:  # a different connection sees only COMMITTED rows
+        with engine.connect() as other:  # a different connection sees only COMMITTED rows
             seen["row"] = other.execute(
                 text("select refund_status from dispute_resolutions")
             ).fetchall()
@@ -353,3 +352,69 @@ def test_paystack_list_refunds(monkeypatch):
     monkeypatch.setattr(requests, "get", get)
     assert PaystackService.list_refunds("ps_ref_1") == [{"id": 1, "status": "processed"}]
     assert seen["url"].endswith("/refund") and seen["params"] == {"transaction": "ps_ref_1"}
+
+
+# ---------------------------------------------------- Paystack webhook wiring (payments.py)
+
+WEBHOOK_SECRET = "whsec_refund_test"
+
+
+def _post_event(client, event, data, secret=WEBHOOK_SECRET):
+    import hashlib
+    import hmac
+    import json
+
+    body = json.dumps({"event": event, "data": data}).encode()
+    sig = hmac.new(secret.encode(), body, hashlib.sha512).hexdigest()
+    return client.post(
+        "/api/v1/payments/webhook",
+        content=body,
+        headers={"x-paystack-signature": sig, "content-type": "application/json"},
+    )
+
+
+@pytest.fixture()
+def webhook_secret(monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "PAYSTACK_WEBHOOK_SECRET", WEBHOOK_SECRET)
+
+
+def test_refund_webhook_events_drive_status_through_the_real_route(
+    client, db, admin_h, disputed, ps, webhook_secret
+):
+    ps.refunds = [{"id": 4242, "status": "pending"}]
+    resolve(client, admin_h, disputed.id)
+    ref = db.query(Payment).one().paystack_reference
+
+    r = _post_event(client, "refund.processed", {"transaction_reference": ref, "id": 4242})
+    assert r.status_code == 200 and r.json() == {"status": "success", "message": "Refund processed"}
+    assert states(db, disputed.id) == (BookingStatus.CANCELLED, PaymentStatus.REFUNDED, "processed")
+
+
+def test_refund_failed_webhook_reopens_the_dispute(
+    client, db, admin_h, disputed, ps, webhook_secret
+):
+    ps.refunds = [{"id": 4242, "status": "pending"}]
+    resolve(client, admin_h, disputed.id)
+    ref = db.query(Payment).one().paystack_reference
+
+    r = _post_event(client, "refund.failed", {"transaction_reference": ref})
+    assert r.status_code == 200 and r.json()["message"] == "Refund failed"
+    assert states(db, disputed.id) == (BookingStatus.DISPUTED, PaymentStatus.SUCCESS, "failed")
+
+
+def test_refund_webhook_unknown_transaction_is_acknowledged(client, webhook_secret):
+    r = _post_event(client, "refund.processed", {"transaction_reference": "not-ours"})
+    assert r.status_code == 200 and r.json()["status"] == "ignored"
+
+
+def test_refund_webhook_requires_a_valid_paystack_signature(
+    client, db, admin_h, disputed, ps, webhook_secret
+):
+    ps.refunds = [{"id": 4242, "status": "pending"}]
+    resolve(client, admin_h, disputed.id)
+    ref = db.query(Payment).one().paystack_reference
+    r = _post_event(client, "refund.failed", {"transaction_reference": ref}, secret="wrong")
+    assert r.status_code == 401
+    assert states(db, disputed.id)[2] == "pending"  # untouched

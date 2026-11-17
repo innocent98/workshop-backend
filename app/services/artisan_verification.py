@@ -31,7 +31,7 @@ from app.schemas.verification import (
     VerificationStartResponse,
     VerificationStatusResponse,
 )
-from app.services import admin as admin_service
+from app.services.notify import notify_user
 
 REASON_INVALID_NIN = "We could not verify this NIN. Check the number and try again."
 REASON_SELFIE = (
@@ -263,14 +263,14 @@ def confirm_verification(
 
     if applied and was_pending:
         if passed:
-            admin_service.notify_user(
+            notify_user(
                 record.user_id,
                 "You're verified",
                 "Your identity has been verified.",
                 {"event": "verification_approved"},
             )
         else:
-            admin_service.notify_user(
+            notify_user(
                 record.user_id,
                 "Verification failed",
                 "We couldn't verify your identity. Open the app to see why and retry.",

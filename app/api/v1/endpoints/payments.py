@@ -25,6 +25,7 @@ from app.schemas.payment import (
     ReleasePaymentRequest,
     VerifyPaymentResponse,
 )
+from app.services.admin import handle_refund_event
 from app.services.payment_service import (
     OUTCOME_ALREADY,
     OUTCOME_MISMATCH,
@@ -332,6 +333,14 @@ def verify_payment(
     }
 
 
+REFUND_WEBHOOK_EVENTS = (
+    "refund.pending",
+    "refund.processing",
+    "refund.processed",
+    "refund.failed",
+)
+
+
 def _handle_webhook_event(db: Session, event: Optional[str], data: dict) -> dict:
     """Blocking part of the webhook (DB locks, row updates): runs in the threadpool."""
     if event == "charge.success":
@@ -367,6 +376,13 @@ def _handle_webhook_event(db: Session, event: Optional[str], data: dict) -> dict
         )
         outcome = settle_transfer_failure(db, data, new_status)
         return {"status": "success", "message": f"Transfer {outcome}"}
+
+    if event in REFUND_WEBHOOK_EVENTS:
+        # Async refund lifecycle of an admin dispute resolution (app/services/admin.py).
+        refund_status = handle_refund_event(db, event, data)
+        if refund_status is None:
+            return {"status": "ignored", "message": "Refund not found"}
+        return {"status": "success", "message": f"Refund {refund_status}"}
 
     return {"status": "ignored", "message": f"Unhandled event: {event}"}
 

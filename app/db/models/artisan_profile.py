@@ -71,7 +71,7 @@ class ArtisanProfile(Base):
     verified_by = Column(UUID(as_uuid=True), nullable=True)  # Admin user who verified
 
     # Identity verification (NIN + live selfie via Dojah, or admin override).
-    # The NIN/selfie go to Dojah's hosted widget, never to us; at most the last 4 NIN digits are kept.
+    # NIN/selfie go to Dojah's hosted widget, never to us; at most the last 4 NIN digits are kept.
     # Per-attempt history lives in artisan_verification_records.
     verification_status = Column(
         String(16), nullable=False, default="unverified", server_default="unverified", index=True

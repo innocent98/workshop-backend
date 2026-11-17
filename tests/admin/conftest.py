@@ -1,7 +1,6 @@
 """
-Fixtures for admin / verification tests. They need a real Postgres+PostGIS database
-(the models use Geography columns), taken from DATABASE_URL. Tables are truncated
-between tests, so the database name must contain "test" as a safety guard.
+Admin / verification test helpers. The shared fixtures (``db``, ``client``, ``notifications``,
+schema + table cleanup) come from ``tests/conftest.py`` (PostgreSQL + PostGIS from DATABASE_URL).
 """
 
 import itertools
@@ -10,74 +9,16 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
-from fastapi.testclient import TestClient
 from geoalchemy2 import WKTElement
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
 
-from app.api.v1.endpoints import admin as admin_endpoints  # noqa: F401
-from app.core.config import settings
 from app.core.security import create_access_token, get_password_hash
-from app.db.base import Base, import_models
 from app.db.models.artisan_profile import ArtisanProfile
 from app.db.models.booking import Booking, BookingStatus
 from app.db.models.payment import Payment, PaymentStatus
 from app.db.models.service import Service
 from app.db.models.user import User, UserType
-from app.db.session import get_db
-from app.main import app
-from app.services import admin as admin_service
 
 _counter = itertools.count(1)
-
-
-@pytest.fixture(scope="session")
-def pg_engine():
-    url = settings.DATABASE_URL
-    db_name = url.rsplit("/", 1)[-1].split("?")[0]
-    if "test" not in db_name:
-        pytest.fail(f"Refusing to run destructive admin tests on database '{db_name}'")
-    engine = create_engine(url)
-    with engine.begin() as conn:
-        conn.execute(text("CREATE EXTENSION IF NOT EXISTS postgis"))
-    import_models()
-    Base.metadata.drop_all(engine)
-    Base.metadata.create_all(engine)
-    yield engine
-    Base.metadata.drop_all(engine)
-    engine.dispose()
-
-
-@pytest.fixture()
-def db(pg_engine):
-    names = ", ".join(f'"{t.name}"' for t in Base.metadata.sorted_tables)
-    with pg_engine.begin() as conn:
-        conn.execute(text(f"TRUNCATE {names} RESTART IDENTITY CASCADE"))
-    session = sessionmaker(bind=pg_engine, autoflush=False)()
-    yield session
-    session.close()
-
-
-@pytest.fixture()
-def notifications(monkeypatch):
-    sent = []
-    monkeypatch.setattr(
-        admin_service,
-        "notify_user",
-        lambda user_id, title, body, data=None: sent.append((str(user_id), title, data)),
-    )
-    return sent
-
-
-@pytest.fixture()
-def client(db, notifications):
-    def override_get_db():
-        yield db
-
-    app.dependency_overrides[get_db] = override_get_db
-    with TestClient(app) as c:
-        yield c
-    app.dependency_overrides.clear()
 
 
 def make_user(db, user_type=UserType.CLIENT, is_admin=False, **kw):

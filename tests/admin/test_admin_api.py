@@ -148,7 +148,7 @@ def test_release_to_artisan(client, db, admin, admin_h, service, notifications):
     assert res.admin_id == admin.id and res.resolution == "release_to_artisan"
     assert res.dispute_reason == "Work not done"  # snapshot kept
     assert db.query(AdminAuditLog).filter_by(action="dispute.release_to_artisan").count() == 1
-    assert {n[0] for n in notifications} == {str(customer.id), str(artisan.id)}
+    assert {n["user_id"] for n in notifications} == {str(customer.id), str(artisan.id)}
 
     # gone from the open list
     assert client.get("/api/v1/admin/disputes", headers=admin_h).json()["total"] == 0
@@ -229,7 +229,7 @@ def test_refund_customer_with_fake_paystack(
     bk = db.get(Booking, b.id)
     assert bk.status == BookingStatus.CANCELLED
     assert "Artisan no-show" in bk.cancellation_reason
-    assert {n[0] for n in notifications} == {str(customer.id), str(artisan.id)}
+    assert {n["user_id"] for n in notifications} == {str(customer.id), str(artisan.id)}
 
     # idempotent: no second Paystack call
     again = _resolve(client, admin_h, b.id, "refund_customer", note="Artisan no-show")

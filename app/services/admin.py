@@ -20,17 +20,8 @@ from app.db.models.booking import Booking, BookingStatus
 from app.db.models.payment import Payment, PaymentStatus
 from app.db.models.user import User, UserType
 from app.schemas.admin import AdminArtisanVerificationResponse, ResolveDisputeResponse
+from app.services.notify import notify_user
 from app.services.paystack import PaystackError, PaystackService
-
-
-def notify_user(user_id, title: str, body: str, data: Optional[dict] = None) -> None:
-    """Best-effort push + in-app notification; must never break an admin action."""
-    try:
-        from app.tasks.notification_tasks import send_push_notification
-
-        send_push_notification.delay(user_id=str(user_id), title=title, body=body, data=data or {})
-    except Exception as exc:  # broker down etc.
-        logger.warning(f"notify_user failed for {user_id}: {type(exc).__name__}")
 
 
 def _err(code: str, message: str, http_status: int) -> HTTPException:

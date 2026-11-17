@@ -59,7 +59,7 @@ async def get_current_user(
 
 
 def require_admin(current_user: User = Depends(get_current_user)) -> User:
-    """Allow only users flagged ``is_admin``. Reuses get_current_user (JWT, active, email-verified)."""
+    """Allow only users flagged ``is_admin`` (after get_current_user's JWT/active/email checks)."""
     if not current_user.is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

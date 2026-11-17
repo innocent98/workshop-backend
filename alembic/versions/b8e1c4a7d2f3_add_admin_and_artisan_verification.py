@@ -1,7 +1,7 @@
 """add admin flag, artisan verification fields, dispute resolutions, admin audit log
 
 Revision ID: b8e1c4a7d2f3
-Revises: f7b8c9d0e1f2
+Revises: c8a1d2e3f4b5
 Create Date: 2026-11-17
 """
 
@@ -11,7 +11,7 @@ from sqlalchemy.dialects import postgresql
 from alembic import op
 
 revision = "b8e1c4a7d2f3"
-down_revision = "f7b8c9d0e1f2"
+down_revision = "c8a1d2e3f4b5"
 branch_labels = None
 depends_on = None
 
