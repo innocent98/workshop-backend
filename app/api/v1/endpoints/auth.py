@@ -24,6 +24,7 @@ from firebase_admin import credentials
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
+from app.core import attempt_limit
 from app.core.config import settings
 from app.core.logger import log
 from app.core.rate_limit import limiter
@@ -486,6 +487,7 @@ def change_password(
 # ACCOUNT DELETION
 # ============================================================================
 
+DELETE_SCOPE = "account_delete"
 REAUTH_MAX_AGE_SECONDS = 300  # a Google re-auth must come from a sign-in in the last 5 minutes
 
 
@@ -496,6 +498,25 @@ def _deletion_error(code: str, message: str, http_status: int, **extra) -> HTTPE
 
 
 def _reauthenticate_for_deletion(user: User, body: DeleteAccountRequest) -> None:
+    """Re-authenticate; wrong credentials are also counted per USER (5 per 15 min)."""
+    if attempt_limit.is_locked(DELETE_SCOPE, str(user.id)):
+        raise _deletion_error(
+            "too_many_attempts",
+            "Too many incorrect attempts. Please try again in a few minutes.",
+            status.HTTP_429_TOO_MANY_REQUESTS,
+        )
+    try:
+        _check_deletion_credentials(user, body)
+    except HTTPException as exc:
+        if isinstance(exc.detail, dict) and exc.detail.get("code") in (
+            "invalid_password",
+            "invalid_reauth",
+        ):
+            attempt_limit.register_failure(DELETE_SCOPE, str(user.id))
+        raise
+
+
+def _check_deletion_credentials(user: User, body: DeleteAccountRequest) -> None:
     if user.hashed_password:
         if not body.password:
             raise _deletion_error(
@@ -570,6 +591,7 @@ def delete_my_account(
             status.HTTP_409_CONFLICT,
             blockers=blockers,
         )
+    attempt_limit.clear(DELETE_SCOPE, str(user.id))
     if token:
         blacklist_token(token)
     for image_url in result["image_urls"]:

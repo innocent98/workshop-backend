@@ -585,3 +585,164 @@ def test_password_hash_is_gone_so_the_old_password_is_useless(db, client):
     db.expire_all()
     assert not db.get(User, u.id).hashed_password
     assert verify_password(PW, old_hash)  # sanity: it was a valid hash before
+
+
+# ------------------------------------------------- PII on financial rows / refunds / attempts
+
+RAW_PAYSTACK = {
+    "id": 4099,
+    "status": "success",
+    "reference": "ps_demo_1",
+    "amount": 800000,
+    "channel": "card",
+    "currency": "NGN",
+    "fees": 12000,
+    "customer": {"id": 1, "email": "ada@example.com", "first_name": "Ada", "phone": "0801"},
+    "authorization": {"last4": "4081", "bank": "TEST BANK", "account_name": "ADA CUSTOMER"},
+    "log": {"history": [{"message": "Attempted to pay"}], "ip": "1.2.3.4"},
+    "ip_address": "1.2.3.4",
+    "metadata": {"booking_id": 1},
+}
+
+
+def test_raw_paystack_json_on_payments_is_scrubbed_but_accounting_fields_stay(client, db, service):
+    import json
+
+    customer, artisan = user_with_pw(db), make_user(db, user_type=UserType.ARTISAN)
+    make_booking(
+        db,
+        service,
+        customer,
+        artisan,
+        status=BookingStatus.COMPLETED,
+        payment_status=PaymentStatus.RELEASED,
+        disputed=False,
+    )
+    p = db.query(Payment).one()
+    p.paystack_response = json.dumps(RAW_PAYSTACK)
+    p.payout_response = json.dumps(
+        {
+            "transfer_code": "TRF_1",
+            "amount": 720000,
+            "recipient": {"details": {"account_name": "ADA"}},
+        }
+    )
+    db.commit()
+
+    assert delete(client, customer, {"password": PW}).status_code == 200
+    db.expire_all()
+    p = db.query(Payment).one()
+    raw = json.loads(p.paystack_response)
+    for gone in ("customer", "authorization", "log", "ip_address"):
+        assert gone not in raw
+    blob = p.paystack_response + (p.payout_response or "")
+    for pii in ("ada@example.com", "Ada", "4081", "ADA CUSTOMER", "1.2.3.4", "TEST BANK", "0801"):
+        assert pii not in blob
+    assert raw["amount"] == 800000 and raw["reference"] == "ps_demo_1" and raw["channel"] == "card"
+    payout = json.loads(p.payout_response)
+    assert payout["transfer_code"] == "TRF_1" and "recipient" not in payout
+
+
+def test_unparseable_raw_json_is_nulled(client, db, service):
+    customer, artisan = user_with_pw(db), make_user(db, user_type=UserType.ARTISAN)
+    make_booking(
+        db,
+        service,
+        customer,
+        artisan,
+        status=BookingStatus.COMPLETED,
+        payment_status=PaymentStatus.RELEASED,
+        disputed=False,
+    )
+    p = db.query(Payment).one()
+    p.paystack_response = "not json ada@example.com"
+    db.commit()
+    assert delete(client, customer, {"password": PW}).status_code == 200
+    db.expire_all()
+    assert db.query(Payment).one().paystack_response is None
+
+
+def test_artisan_side_payout_json_is_scrubbed_too(client, db, service):
+    import json
+
+    customer, artisan = make_user(db), user_with_pw(db, user_type=UserType.ARTISAN)
+    make_booking(
+        db,
+        service,
+        customer,
+        artisan,
+        status=BookingStatus.COMPLETED,
+        payment_status=PaymentStatus.RELEASED,
+        disputed=False,
+    )
+    p = db.query(Payment).one()
+    p.payout_response = json.dumps(
+        {"transfer_code": "TRF_9", "recipient": {"details": {"account_number": "0123456789"}}}
+    )
+    db.commit()
+    assert delete(client, artisan, {"password": PW}).status_code == 200
+    db.expire_all()
+    out = db.query(Payment).one().payout_response
+    assert "0123456789" not in out and "TRF_9" in out
+
+
+def test_customer_with_a_refund_owed_cannot_delete_yet(client, db, service):
+    """A payment flagged needs_refund is money we still owe back: block, so the customer can be
+    contacted and refunded (the refund itself works by Paystack reference either way)."""
+    customer, artisan = user_with_pw(db), make_user(db, user_type=UserType.ARTISAN)
+    make_booking(
+        db,
+        service,
+        customer,
+        artisan,
+        status=BookingStatus.CANCELLED,
+        payment_status=PaymentStatus.SUCCESS,
+        disputed=False,
+    )
+    pay = db.query(Payment).one()
+    pay.needs_refund = True
+    db.commit()
+    r = delete(client, customer, {"password": PW})
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "refund_pending"
+    assert blockers(r)["refund_pending"]["count"] == 1
+    pay.needs_refund = False  # refunded by an admin
+    db.commit()
+    assert delete(client, customer, {"password": PW}).status_code == 200
+
+
+def test_refunds_in_flight_after_an_admin_resolution_do_not_block(client, db, service):
+    """A refund accepted by Paystack (cancelled + refunded) completes by reference."""
+    customer, artisan = user_with_pw(db), make_user(db, user_type=UserType.ARTISAN)
+    make_booking(
+        db,
+        service,
+        customer,
+        artisan,
+        status=BookingStatus.CANCELLED,
+        payment_status=PaymentStatus.REFUNDED,
+        disputed=False,
+    )
+    assert delete(client, customer, {"password": PW}).status_code == 200
+
+
+def test_wrong_passwords_are_limited_per_user_not_only_per_ip(client, db):
+    u = user_with_pw(db)
+    for _ in range(5):
+        assert delete(client, u, {"password": "nope-nope"}).status_code == 403
+    r = delete(client, u, {"password": PW})  # even the right password is refused while locked
+    assert r.status_code == 429 and r.json()["detail"]["code"] == "too_many_attempts"
+    db.expire_all()
+    assert db.get(User, u.id).is_active is True
+
+    other = user_with_pw(db)  # another user (same IP) is not affected
+    assert delete(client, other, {"password": PW}).status_code == 200
+
+
+def test_a_successful_delete_resets_nothing_it_needs_and_failures_expire(db, client):
+    from app.core import attempt_limit
+
+    u = user_with_pw(db)
+    assert delete(client, u, {"password": "nope-nope"}).status_code == 403
+    assert attempt_limit.failures("account_delete", str(u.id)) == 1
+    assert delete(client, u, {"password": PW}).status_code == 200
+    assert attempt_limit.failures("account_delete", str(u.id)) == 0  # cleared on success

@@ -12,9 +12,10 @@ reviewer name shows as "Deleted User"), and the booking free-text/location field
 counterparty's records and disputes; a legal-retention decision, see the SOP).
 """
 
+import json
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import List
+from typing import Any, List
 from urllib.parse import urlparse
 
 from sqlalchemy import func
@@ -44,9 +45,48 @@ ACTIVE_BOOKING_STATES = (
 )
 UNFINISHED_WITHDRAWAL_STATES = (WithdrawalStatus.PROCESSING, WithdrawalStatus.NEEDS_REVIEW)
 
+# Keys removed from the raw Paystack JSON kept on payment rows (customer identity, card/bank,
+# device/IP). Amounts, references, status, channel, fees and ids stay for accounting.
+_PII_KEYS = frozenset(
+    {
+        "customer",
+        "authorization",
+        "log",
+        "ip_address",
+        "recipient",
+        "details",
+        "email",
+        "first_name",
+        "last_name",
+        "phone",
+        "account_name",
+        "account_number",
+    }
+)
+
+
+def scrub_raw_json(raw: Any):
+    """Return ``raw`` (a JSON string) without PII keys, or None if it cannot be parsed."""
+    if not raw:
+        return raw
+
+    def strip(value):
+        if isinstance(value, dict):
+            return {k: strip(v) for k, v in value.items() if k not in _PII_KEYS}
+        if isinstance(value, list):
+            return [strip(v) for v in value]
+        return value
+
+    try:
+        return json.dumps(strip(json.loads(raw)))
+    except (TypeError, ValueError):
+        return None
+
+
 BLOCKER_MESSAGES = {
     "active_bookings": "Finish or cancel your accepted, paid, in-progress and disputed bookings.",
     "unfinished_withdrawal": "A withdrawal is still being processed. Wait for it to finish first.",
+    "refund_pending": "A refund owed to you is still being processed. Please wait for it.",
     "wallet_balance": "Withdraw your earnings first (money awaiting confirmation counts too).",
 }
 
@@ -120,6 +160,17 @@ def find_blockers(db: Session, user: User) -> List[dict]:
     )
     if unfinished:
         blockers.append({"code": "unfinished_withdrawal", "count": unfinished})
+
+    # Money we still owe back to this customer (e.g. a duplicate or late payment): keep the account
+    # so support can reach them. (The refund itself works by Paystack reference either way.)
+    owed_refunds = (
+        db.query(func.count(Payment.id))
+        .join(Booking, Booking.id == Payment.booking_id)
+        .filter(Booking.customer_id == user.id, Payment.needs_refund.is_(True))
+        .scalar()
+    )
+    if owed_refunds:
+        blockers.append({"code": "refund_pending", "count": owed_refunds})
 
     # Completed jobs whose money has not been withdrawn: withdrawable now, or still inside the
     # client's confirmation window. Either way it is the artisan's money and must be paid out first.
@@ -251,10 +302,13 @@ def delete_account(db: Session, user: User) -> dict:
     for payment in (
         db.query(Payment)
         .join(Booking, Booking.id == Payment.booking_id)
-        .filter(Booking.customer_id == uid)
+        .filter((Booking.customer_id == uid) | (Booking.artisan_id == uid))
     ):
-        payment.customer_name = "Deleted User"
-        payment.customer_email = placeholder_email
+        if payment.booking.customer_id == uid:
+            payment.customer_name = "Deleted User"
+            payment.customer_email = placeholder_email
+        payment.paystack_response = scrub_raw_json(payment.paystack_response)
+        payment.payout_response = scrub_raw_json(payment.payout_response)
     db.query(Withdrawal).filter(Withdrawal.artisan_id == uid).update(
         {Withdrawal.account_name: None}, synchronize_session=False
     )

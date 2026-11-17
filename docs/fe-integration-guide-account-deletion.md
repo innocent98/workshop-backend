@@ -18,7 +18,7 @@ account" screen. It **soft-deletes and anonymises** the account (financial recor
 
 Some HTTP clients/proxies drop bodies on `DELETE`: Flutter `http.delete(url, headers:, body:)` and Dio
 (`data:`) send it; if you ever see `password_required` for a body you did send, check the client.
-Rate limit: 10 attempts / 15 min / IP (429).
+Rate limits: 10 requests / 15 min / IP, and **5 wrong passwords or Google tokens per 15 min per user** (then 429 `too_many_attempts` even for the right password, until the window passes).
 
 ## 2. Success: 200
 
@@ -45,8 +45,9 @@ user. The same email/phone can be registered again.
 | 403 | `invalid_password` | wrong password: inline error (does not log the user out) |
 | 403 | `reauth_required` | Google token older than 5 minutes: re-run Google sign-in, retry |
 | 403 | `invalid_reauth` | Google token invalid or for a different Google account |
+| 429 | `too_many_attempts` | 5 wrong credentials in 15 min for this user: show "try again in a few minutes" |
 | 409 | `admin_account` | admin accounts cannot be deleted from the app |
-| 409 | `active_bookings` / `unfinished_withdrawal` / `wallet_balance` | **blocked**, see below |
+| 409 | `active_bookings` / `unfinished_withdrawal` / `wallet_balance` / `refund_pending` | **blocked**, see below |
 | 401/403 | (string) | not authenticated / revoked token: standard handling |
 
 ### Blocked: 409
@@ -60,7 +61,17 @@ user. The same email/phone can be registered again.
 |---|---|---|
 | `active_bookings` (`count`) | bookings (as customer **or** artisan) in accepted, paid, in-progress or disputed state | finish/cancel them, or wait for the dispute to be resolved |
 | `unfinished_withdrawal` (`count`) | a withdrawal is processing or needs review | wait for it to finish |
+| `refund_pending` (`count`) | a payment of yours is flagged as owed back to you (e.g. a duplicate or late payment) and the refund has not been done yet | wait for support to finish the refund |
 | `wallet_balance` (`amount`, string, Naira) | completed jobs whose money has not been withdrawn (withdrawable now **or** still inside the client's confirmation window) | withdraw the earnings first (wallet screen) |
+
+## 3b. Other endpoints: `409 account_unavailable`
+
+Because accounts can now disappear, booking actions are refused when the **other party's account is deleted or
+deactivated**: `PATCH /bookings/{id}/negotiate`, `/negotiate/respond`, `/accept`, `/start`, progress logs,
+`/complete`, `/confirm-completion`, `/dispute-completion`, and `POST /payments/initialize` return
+`409 {"detail": {"code": "account_unavailable", "message": "..."}}`. `reject` and `cancel` still work so nobody is
+trapped. In the UI: show "This user's account is no longer available" and offer to cancel the booking. A booking
+request created for an artisan whose deletion is in flight returns the usual 404 `Artisan not found or inactive`.
 
 ## 4. UX instructions
 
@@ -523,3 +534,5 @@ direct DB read after the delete (not an API response)
 | Google-only re-auth: missing / stale / wrong account / fresh token | live against the real endpoint, but Firebase ID-token verification is **stubbed** in the capture server: **NOT VERIFIED LIVE against Firebase**. The real `auth_time` claim of a Firebase ID token (seconds since epoch) is assumed from Firebase's documented token claims |
 | `unfinished_withdrawal` blocker, `wallet_balance` for money still in the confirmation window, rejected pending booking for a deleted artisan, portfolio image removal from Cloudinary, every other token of the account dying | tests only |
 | Other tokens of the same account (other devices) stop working | tests only (they are rejected because the account is inactive) |
+| `refund_pending` blocker, 429 `too_many_attempts` (per-user limit), 409 `account_unavailable` on booking actions and payment initialisation, booking row locking under a concurrent deletion | tests only (the lock tests use a second database session and threads) |
+| Raw Paystack/payout JSON scrubbed on deletion | tests only |

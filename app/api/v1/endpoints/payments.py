@@ -90,7 +90,7 @@ def initialize_payment(
         )
 
     # Get booking
-    booking = db.query(Booking).filter(Booking.id == request.booking_id).first()
+    booking = db.query(Booking).filter(Booking.id == request.booking_id).with_for_update().first()
     if not booking:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
 
@@ -98,6 +98,16 @@ def initialize_payment(
     if booking.customer_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="You don't own this booking"
+        )
+
+    artisan = db.query(User).filter(User.id == booking.artisan_id).first()
+    if artisan is None or not artisan.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "account_unavailable",
+                "message": "The artisan's account is no longer available.",
+            },
         )
 
     # Check booking status
