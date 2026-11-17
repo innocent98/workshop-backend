@@ -25,7 +25,7 @@ from app.core.logger import logger
 from app.db.models.artisan_profile import ArtisanProfile
 from app.db.models.user import User
 from app.db.models.verification_record import ArtisanVerificationRecord as Record
-from app.integrations.dojah.client import DojahClient, DojahError
+from app.integrations.dojah.client import DojahClient, DojahError, credential_or_none
 from app.schemas.verification import (
     VerificationConfigResponse,
     VerificationStartResponse,
@@ -66,15 +66,18 @@ def _now() -> datetime:
 
 
 def is_configured() -> bool:
-    return bool(settings.DOJAH_API_KEY and settings.DOJAH_NIN_WIDGET_ID)
+    return bool(
+        credential_or_none(settings.DOJAH_API_KEY)
+        and credential_or_none(settings.DOJAH_NIN_WIDGET_ID)
+    )
 
 
 def get_config() -> VerificationConfigResponse:
     return VerificationConfigResponse(
         configured=is_configured(),
-        app_id=settings.DOJAH_APP_ID,
-        public_key=settings.DOJAH_PUBLIC_KEY,
-        widget_id=settings.DOJAH_NIN_WIDGET_ID,
+        app_id=credential_or_none(settings.DOJAH_APP_ID),
+        public_key=credential_or_none(settings.DOJAH_PUBLIC_KEY),
+        widget_id=credential_or_none(settings.DOJAH_NIN_WIDGET_ID),
         environment=settings.DOJAH_ENVIRONMENT,
     )
 

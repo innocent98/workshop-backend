@@ -13,6 +13,7 @@ All accounts have:
 - Location set (Lagos area for artisans)
 """
 
+import secrets
 import sys
 import os
 from pathlib import Path
@@ -166,8 +167,12 @@ def main():
     db = SessionLocal()
 
     try:
-        # Common password for all test accounts
-        password = "Test123!"
+        # Common password for all test accounts. Never commit one: set TEST_ACCOUNT_PASSWORD,
+        # or let the script generate a random one and print it once.
+        password = os.environ.get("TEST_ACCOUNT_PASSWORD")
+        if not password:
+            password = secrets.token_urlsafe(12) + "aA1!"
+            print(f"No TEST_ACCOUNT_PASSWORD set; generated password for this run: {password}\n")
 
         # Lagos coordinates with variations
         lagos_base_lat = 6.5244

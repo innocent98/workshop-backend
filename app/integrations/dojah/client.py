@@ -40,6 +40,30 @@ PROD_HOST = "https://api.dojah.io"
 SANDBOX_HOST = "https://sandbox.dojah.io"
 MAX_ATTEMPTS = 3
 
+# The DOJAH_* values shipped in .env.example. A server whose .env was copied from the example and
+# never filled in must read as "not configured", not as a real (but wrong) set of credentials.
+_PLACEHOLDER_VALUES = frozenset(
+    {
+        "your-dojah-secret-key",
+        "your-dojah-app-id",
+        "your-dojah-public-key",
+        "your-nin-widget-id",
+        "your-dojah-webhook-subscription-secret",
+    }
+)
+_PLACEHOLDER_PREFIXES = ("your-", "your_", "changeme", "change-me", "<")
+
+
+def credential_or_none(value: Optional[str]) -> Optional[str]:
+    """The trimmed value, or None when it is blank or still an .env.example placeholder."""
+    cleaned = (value or "").strip()
+    if not cleaned:
+        return None
+    lowered = cleaned.lower()
+    if lowered in _PLACEHOLDER_VALUES or lowered.startswith(_PLACEHOLDER_PREFIXES):
+        return None
+    return cleaned
+
 
 class DojahError(Exception):
     """Provider/config problem (timeout, 5xx, bad keys, no balance, unknown reference)."""
@@ -150,6 +174,6 @@ class DojahClient:
 
 def get_dojah_client() -> Optional[DojahClient]:
     """FastAPI dependency (override in tests). None when Dojah is not configured."""
-    if not settings.DOJAH_API_KEY:
+    if not credential_or_none(settings.DOJAH_API_KEY):
         return None
     return DojahClient()
