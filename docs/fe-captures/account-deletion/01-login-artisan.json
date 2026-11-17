@@ -1,0 +1,25 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+      "email": "artisan@example.com",
+      "password": "<placeholder>"
+    }
+  },
+  "status": 200,
+  "response": {
+    "success": true,
+    "message": "Login successful",
+    "token": "<jwt redacted>",
+    "user": {
+      "id": "d95eaaa4-92ae-4310-bdfc-1c6ab4f3f944",
+      "full_name": "Demo Artisan",
+      "email": "artisan@example.com",
+      "phone_number": "+2348000000002",
+      "user_type": "artisan",
+      "profile_picture_url": null,
+      "bio": null
+    }
+  }
+}

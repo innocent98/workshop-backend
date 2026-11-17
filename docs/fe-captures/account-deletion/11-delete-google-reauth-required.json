@@ -1,0 +1,15 @@
+{
+  "request": {
+    "method": "DELETE",
+    "path": "/auth/me",
+    "body": {}
+  },
+  "status": 400,
+  "response": {
+    "detail": {
+      "code": "reauth_required",
+      "message": "Sign in with Google again to delete your account."
+    }
+  },
+  "note": "Google-only account, no token sent"
+}

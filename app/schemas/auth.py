@@ -305,3 +305,21 @@ class MyServicesResponse(BaseModel):
     """Current authenticated user's selected services."""
 
     services: List[str]
+
+
+# ============================================================================
+# ACCOUNT DELETION
+# ============================================================================
+
+
+class DeleteAccountRequest(BaseModel):
+    """Re-authentication for account deletion: ``password`` for accounts that have one,
+    ``google_token`` (a fresh Firebase ID token) for Google-only accounts."""
+
+    password: Optional[str] = None
+    google_token: Optional[str] = None
+
+
+class DeleteAccountResponse(BaseModel):
+    success: bool = True
+    message: str

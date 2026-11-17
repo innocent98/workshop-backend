@@ -1,0 +1,15 @@
+{
+  "request": {
+    "method": "DELETE",
+    "path": "/auth/me",
+    "body": {
+      "google_token": "fresh"
+    }
+  },
+  "status": 200,
+  "response": {
+    "success": true,
+    "message": "Your account has been deleted."
+  },
+  "note": "Firebase verification STUBBED (NOT VERIFIED LIVE against Firebase)"
+}

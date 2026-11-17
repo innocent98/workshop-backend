@@ -1,0 +1,16 @@
+{
+  "request": {
+    "method": "DELETE",
+    "path": "/auth/me",
+    "body": {
+      "google_token": "other"
+    }
+  },
+  "status": 403,
+  "response": {
+    "detail": {
+      "code": "invalid_reauth",
+      "message": "That Google account does not match this account."
+    }
+  }
+}

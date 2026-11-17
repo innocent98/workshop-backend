@@ -1,0 +1,16 @@
+{
+  "request": {
+    "method": "DELETE",
+    "path": "/auth/me",
+    "body": {
+      "password": "Placeholder-pw-1"
+    }
+  },
+  "status": 409,
+  "response": {
+    "detail": {
+      "code": "admin_account",
+      "message": "Admin accounts cannot be deleted from the app."
+    }
+  }
+}

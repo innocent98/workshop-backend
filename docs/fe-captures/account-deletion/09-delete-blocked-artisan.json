@@ -1,0 +1,29 @@
+{
+  "request": {
+    "method": "DELETE",
+    "path": "/auth/me",
+    "body": {
+      "password": "Placeholder-pw-1"
+    }
+  },
+  "status": 409,
+  "response": {
+    "detail": {
+      "code": "active_bookings",
+      "message": "Your account cannot be deleted yet: Finish or cancel your accepted, paid, in-progress and disputed bookings. Withdraw your earnings first (money awaiting confirmation counts too).",
+      "blockers": [
+        {
+          "code": "active_bookings",
+          "count": 1,
+          "message": "Finish or cancel your accepted, paid, in-progress and disputed bookings."
+        },
+        {
+          "code": "wallet_balance",
+          "amount": "7200.00",
+          "message": "Withdraw your earnings first (money awaiting confirmation counts too)."
+        }
+      ]
+    }
+  },
+  "note": "artisan: active booking + completed job with earnings not yet withdrawn"
+}

@@ -1,0 +1,14 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+      "email": "leaving@example.com",
+      "password": "<placeholder>"
+    }
+  },
+  "status": 401,
+  "response": {
+    "detail": "Invalid email or password"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "request": {
+    "method": "DELETE",
+    "path": "/auth/me",
+    "body": {
+      "password": "<placeholder>"
+    }
+  },
+  "status": 403,
+  "response": {
+    "detail": "Not authenticated"
+  }
+}

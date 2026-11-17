@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "DELETE",
+    "path": "/auth/me",
+    "body": {
+      "google_token": "stale"
+    }
+  },
+  "status": 403,
+  "response": {
+    "detail": {
+      "code": "reauth_required",
+      "message": "Sign in with Google again to delete your account."
+    }
+  },
+  "note": "Firebase verification STUBBED (NOT VERIFIED LIVE against Firebase)"
+}
