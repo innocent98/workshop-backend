@@ -1,0 +1,21 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/wallet/payout/request",
+    "headers": {
+      "Authorization": "Bearer <artisan access token>"
+    },
+    "body": {
+      "amount": "1000.00",
+      "account_number": "0000000000",
+      "bank_code": "057",
+      "account_name": "Jane Placeholder"
+    }
+  },
+  "response": {
+    "status": 400,
+    "body": {
+      "detail": "Minimum payout amount is \u20a65,000.00"
+    }
+  }
+}

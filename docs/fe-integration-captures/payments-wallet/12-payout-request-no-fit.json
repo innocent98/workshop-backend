@@ -1,0 +1,21 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/wallet/payout/request",
+    "headers": {
+      "Authorization": "Bearer <artisan access token>"
+    },
+    "body": {
+      "amount": "5000.00",
+      "account_number": "0000000000",
+      "bank_code": "057",
+      "account_name": "Jane Placeholder"
+    }
+  },
+  "response": {
+    "status": 400,
+    "body": {
+      "detail": "No completed jobs fit within \u20a65,000.00. Payouts are made per whole job, so the nearest withdrawable amount is \u20a618,000.00."
+    }
+  }
+}

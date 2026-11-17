@@ -1,0 +1,33 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/wallet/payout/request",
+    "headers": {
+      "Idempotency-Key": "capture-key-0001",
+      "Authorization": "Bearer <artisan access token>"
+    },
+    "body": {
+      "amount": "20000.00",
+      "account_number": "0000000000",
+      "bank_code": "057",
+      "account_name": "Jane Placeholder"
+    }
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "success": true,
+      "message": "Withdrawal of \u20a69,000.00 initiated successfully",
+      "payout_reference": "wdr_719f912790044ddcbcd0e2baf0c531c4",
+      "amount": "9000.00",
+      "account_number": "0000000000",
+      "bank_code": "057",
+      "status": "processing",
+      "withdrawal_id": 1,
+      "requested_amount": "20000.00",
+      "payments_count": 1,
+      "idempotent_replay": false
+    }
+  },
+  "note": "requested 20000, only the 9000 payment fits as a whole payment: the response states the ACTUAL amount"
+}

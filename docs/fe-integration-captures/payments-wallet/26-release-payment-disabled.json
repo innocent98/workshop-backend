@@ -1,0 +1,16 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/payments/1/release",
+    "headers": {
+      "Authorization": "Bearer <artisan access token>"
+    },
+    "body": {}
+  },
+  "response": {
+    "status": 403,
+    "body": {
+      "detail": "Manual payment release is disabled. Withdraw your balance from the wallet instead."
+    }
+  }
+}

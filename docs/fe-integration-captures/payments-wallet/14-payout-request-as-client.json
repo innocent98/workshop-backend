@@ -1,0 +1,21 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/wallet/payout/request",
+    "headers": {
+      "Authorization": "Bearer <client access token>"
+    },
+    "body": {
+      "amount": "20000.00",
+      "account_number": "0000000000",
+      "bank_code": "057",
+      "account_name": "Jane Placeholder"
+    }
+  },
+  "response": {
+    "status": 403,
+    "body": {
+      "detail": "Only artisans can request payouts"
+    }
+  }
+}

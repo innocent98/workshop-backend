@@ -1,0 +1,28 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/payments/webhook",
+    "headers": {
+      "x-paystack-signature": "<hmac-sha512(PAYSTACK_WEBHOOK_SECRET, raw body)>",
+      "content-type": "application/json"
+    },
+    "body": {
+      "event": "charge.success",
+      "data": {
+        "reference": "PAY-26321125320-416",
+        "status": "success",
+        "amount": 1500000,
+        "currency": "NGN",
+        "channel": "mobile_money"
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "status": "success",
+      "message": "Payment already processed"
+    }
+  },
+  "note": "Paystack retry: idempotent no-op"
+}

@@ -1,0 +1,26 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/payments/webhook",
+    "headers": {
+      "x-paystack-signature": "invalid",
+      "content-type": "application/json"
+    },
+    "body": {
+      "event": "charge.success",
+      "data": {
+        "reference": "PAY-26321125320-416",
+        "status": "success",
+        "amount": 1500000,
+        "currency": "NGN",
+        "channel": "mobile_money"
+      }
+    }
+  },
+  "response": {
+    "status": 401,
+    "body": {
+      "detail": "Invalid webhook signature"
+    }
+  }
+}
