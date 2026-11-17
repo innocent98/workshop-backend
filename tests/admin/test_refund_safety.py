@@ -592,10 +592,44 @@ def test_processed_event_while_requested_also_completes_the_booking(
     ps.lists = [[]]
     assert resolve(client, admin_h, disputed.id).status_code == 502  # stuck at 'requested'
     ref = db.query(Payment).one().paystack_reference
+    ps.lists = [[{"id": 5, "status": "processed"}]]  # Paystack confirms the refund exists
     out = handle_refund_event(db, "refund.processed", {"transaction_reference": ref, "id": 5})
     assert out == "processed"
     assert states(db, disputed.id) == (BookingStatus.CANCELLED, PaymentStatus.REFUNDED, "processed")
     assert resolve(client, admin_h, disputed.id, "release_to_artisan").status_code == 409
+
+
+@pytest.mark.parametrize(
+    "lookup",
+    [
+        [],  # Paystack lists nothing
+        [{"id": 5, "status": "failed"}],  # only a failed refund
+        [{"id": 999, "status": "processed"}],  # a different refund than the event names
+        PaystackError("down"),  # cannot confirm
+    ],
+)
+def test_event_is_not_adopted_without_paystack_confirmation(
+    client, db, admin_h, disputed, ps, lookup
+):
+    ps.refunds = [TIMEOUT]
+    ps.lists = [[]]
+    resolve(client, admin_h, disputed.id)  # 'requested'
+    ref = db.query(Payment).one().paystack_reference
+    ps.lists = [lookup]
+    out = handle_refund_event(db, "refund.processed", {"transaction_reference": ref, "id": 5})
+    assert out == "requested"
+    assert states(db, disputed.id) == (BookingStatus.DISPUTED, PaymentStatus.SUCCESS, "requested")
+    # replaying a confirmed event is idempotent
+    ps.lists = [[{"id": 5, "status": "processed"}]]
+    assert (
+        handle_refund_event(db, "refund.processed", {"transaction_reference": ref, "id": 5})
+        == "processed"
+    )
+    assert (
+        handle_refund_event(db, "refund.processed", {"transaction_reference": ref, "id": 5})
+        == "processed"
+    )
+    assert states(db, disputed.id) == (BookingStatus.CANCELLED, PaymentStatus.REFUNDED, "processed")
 
 
 def test_processed_event_for_a_released_booking_is_ignored_but_audited(

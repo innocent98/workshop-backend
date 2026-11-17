@@ -43,8 +43,8 @@ unknown transaction is acknowledged as `ignored`). A `refund.failed` event is ne
 last attempt's lease (`refund_attempt_at`, 90 s) is fresh (409 `refund_attempt_in_progress`), so attempts do not race
 normally; the intent row is **never deleted** (a definite rejection marks it `failed`); `_complete_refund` re-reads
 under the booking lock and adopts Paystack's word (also adopting a refund a stale attempt had marked `failed`, and a
-`refund.processed|pending|processing` event arriving while the row is `requested|failed` now completes the booking
-too). If a refund succeeds at Paystack **after the dispute was released** to the artisan, the release is never
+`refund.processed|pending|processing` event arriving while the row is `requested|failed` completes the booking too, but
+only after Paystack's refund list confirms a live refund matching the event's id; replays are idempotent). If a refund succeeds at Paystack **after the dispute was released** to the artisan, the release is never
 overwritten: the call/event returns 409 `refund_conflict` (or is ignored for events), logs critical and writes a
 `refund.conflict` audit row for manual reconciliation, because money then went both ways.
 

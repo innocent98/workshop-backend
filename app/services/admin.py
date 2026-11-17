@@ -500,12 +500,19 @@ def handle_refund_event(db: Session, event: str, data: dict) -> Optional[str]:
         db.rollback()
         return record.refund_status
 
+    adoption_confirmed = True
+    if accepted_event and observed_status in ("requested", "failed"):
+        adoption_confirmed = _accepted_event_is_confirmed(data, str(tx))
+
     booking = db.query(Booking).filter(Booking.id == payment.booking_id).with_for_update().first()
     db.refresh(record)
     db.refresh(payment)
     current = record.refund_status
     if record.resolution != DisputeResolutionType.REFUND_CUSTOMER.value or current == "processed":
         db.rollback()
+        return current
+    if accepted_event and current in ("requested", "failed") and not adoption_confirmed:
+        db.rollback()  # adopting would cancel the booking: not without Paystack's confirmation
         return current
     if new == "failed" and (
         current != observed_status
@@ -566,6 +573,26 @@ def _names_other_refund(record: DisputeResolution, data: dict) -> bool:
         and event_id is not None
         and str(event_id) != record.refund_reference
     )
+
+
+def _accepted_event_is_confirmed(data: dict, tx: str) -> bool:
+    """Adopting a refund from an event (our own call never confirmed it) marks the payment refunded
+    and cancels the booking, so it is only done when Paystack's refund list shows a live
+    (non-failed) refund for the transaction, matching the event's refund id when it has one. If the
+    lookup fails nothing changes: the row stays and release stays blocked."""
+    try:
+        refunds = PaystackService.list_refunds(tx)
+    except PaystackError:
+        logger.warning("refund event not adopted: could not confirm with Paystack")
+        return False
+    event_id = data.get("id")
+    for item in refunds or []:
+        if not isinstance(item, dict) or _normalise_refund_status(item.get("status")) == "failed":
+            continue
+        if event_id is None or str(item.get("id")) == str(event_id):
+            return True
+    logger.info("refund event not adopted: Paystack lists no matching live refund")
+    return False
 
 
 def _failed_event_is_confirmed(record: DisputeResolution, data: dict, tx: str) -> bool:
