@@ -132,6 +132,43 @@ def test_unconfigured_server(client, artisan, monkeypatch):
     assert r.status_code == 503 and r.json()["detail"]["code"] == "verification_unavailable"
 
 
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("DOJAH_API_KEY", "your-dojah-secret-key"),  # the .env.example placeholder
+        ("DOJAH_API_KEY", "   "),
+        ("DOJAH_API_KEY", ""),
+        ("DOJAH_NIN_WIDGET_ID", "your-nin-widget-id"),
+        ("DOJAH_NIN_WIDGET_ID", "Your-NIN-Widget-Id"),
+        ("DOJAH_NIN_WIDGET_ID", ""),
+    ],
+)
+def test_placeholder_or_blank_credentials_are_unconfigured(
+    client, artisan, monkeypatch, field, value
+):
+    monkeypatch.setattr(settings, field, value)
+    body = client.get(f"{BASE}/config", headers=artisan[1]).json()
+    assert body["configured"] is False
+    r = start(client, artisan[1])
+    assert r.status_code == 503 and r.json()["detail"]["code"] == "verification_unavailable"
+
+
+def test_placeholder_public_fields_are_not_echoed(client, artisan, monkeypatch):
+    monkeypatch.setattr(settings, "DOJAH_APP_ID", "your-dojah-app-id")
+    monkeypatch.setattr(settings, "DOJAH_PUBLIC_KEY", "your-dojah-public-key")
+    monkeypatch.setattr(settings, "DOJAH_NIN_WIDGET_ID", "your-nin-widget-id")
+    body = client.get(f"{BASE}/config", headers=artisan[1]).json()
+    assert body["configured"] is False
+    assert body["app_id"] is None and body["public_key"] is None and body["widget_id"] is None
+
+
+def test_placeholder_api_key_yields_no_dojah_client(monkeypatch):
+    monkeypatch.setattr(settings, "DOJAH_API_KEY", "your-dojah-secret-key")
+    assert get_dojah_client() is None
+    monkeypatch.setattr(settings, "DOJAH_API_KEY", "real-looking-key-123")
+    assert get_dojah_client() is not None
+
+
 def test_status_initial(client, artisan):
     r = client.get(f"{BASE}/status", headers=artisan[1])
     assert r.status_code == 200

@@ -91,3 +91,6 @@ dmypy.json
 
 # Pytest
 .pytest_cache/
+
+# Local test credentials (never commit)
+test_accounts.txt
