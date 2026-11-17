@@ -138,3 +138,35 @@ def test_release_endpoint_is_forbidden_for_everyone(client, artisan, db):
     assert r.status_code == 403
     db.refresh(payment)
     assert payment.status == PaymentStatus.SUCCESS  # nothing was released
+
+
+def test_ambiguous_transfer_gets_an_honest_processing_message(client, artisan, paystack):
+    from app.services.paystack import PaystackError
+
+    paystack.transfer_error = PaystackError("timeout")
+    r = client.post("/api/v1/wallet/payout/request", json=BODY)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "processing"
+    assert "initiated successfully" not in body["message"]
+    assert "confirming" in body["message"]
+
+
+def test_replay_with_a_different_amount_is_409(client, artisan, paystack):
+    headers = {"Idempotency-Key": "amt-1"}
+    assert (
+        client.post("/api/v1/wallet/payout/request", json=BODY, headers=headers).status_code == 200
+    )
+    r = client.post(
+        "/api/v1/wallet/payout/request", json=dict(BODY, amount="18000.00"), headers=headers
+    )
+    assert r.status_code == 409
+
+
+def test_blocking_endpoints_are_plain_def_so_they_run_in_the_threadpool():
+    import inspect
+
+    from app.api.v1.endpoints import payments, wallet
+
+    for fn in (wallet.request_payout, payments.verify_payment, payments.initialize_payment):
+        assert not inspect.iscoroutinefunction(fn), fn.__name__

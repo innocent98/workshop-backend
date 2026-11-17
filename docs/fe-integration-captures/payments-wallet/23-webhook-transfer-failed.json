@@ -9,7 +9,7 @@
     "body": {
       "event": "transfer.failed",
       "data": {
-        "reference": "wdr_4d1ff74248904ae5853f06710e266f69",
+        "reference": "wdr_68affe6b99eb4894aeaabc638f86bbcd",
         "transfer_code": "TRF_placeholder2",
         "amount": 1800000,
         "reason": "Recipient bank unavailable"

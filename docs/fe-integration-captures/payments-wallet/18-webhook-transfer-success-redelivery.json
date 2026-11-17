@@ -9,7 +9,7 @@
     "body": {
       "event": "transfer.success",
       "data": {
-        "reference": "wdr_719f912790044ddcbcd0e2baf0c531c4",
+        "reference": "wdr_9a23832a315c4610a6f79fe9324e443d",
         "transfer_code": "TRF_placeholder1",
         "amount": 900000,
         "status": "success"

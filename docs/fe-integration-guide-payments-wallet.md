@@ -43,26 +43,26 @@ Response:
 ```json
 {
   "id": 5,
-  "payment_reference": "PAY-26321125320-416",
+  "payment_reference": "PAY-26321131446-981",
   "booking_id": 4,
   "authorization_url": "https://checkout.paystack.com/placeholder",
   "amount": "15000.00",
   "platform_fee": "1500.00",
   "artisan_amount": "13500.00",
   "status": "pending",
-  "created_at": "2026-11-17T12:53:20.344740Z"
+  "created_at": "2026-11-17T13:14:46.191177Z"
 }
 ```
 
 After the Paystack checkout, call verify (or just poll the booking). The webhook and verify share one code path,
 so whichever arrives first wins and the other is a no-op:
 
-`GET /api/v1/payments/verify/PAY-26321125320-416`  →  **200**  (capture: `04-verify-after-webhook.json`)
+`GET /api/v1/payments/verify/PAY-26321131446-981`  →  **200**  (capture: `04-verify-after-webhook.json`)
 
 Response:
 ```json
 {
-  "payment_reference": "PAY-26321125320-416",
+  "payment_reference": "PAY-26321131446-981",
   "status": "success",
   "amount": "15000.00",
   "paid": true,
@@ -152,7 +152,7 @@ Response:
   "earnings": [
     {
       "payment_id": 5,
-      "payment_reference": "PAY-26321125320-416",
+      "payment_reference": "PAY-26321131446-981",
       "booking_id": 4,
       "booking_reference": "BK-CAP-LIVE",
       "amount": "13500.00",
@@ -161,10 +161,10 @@ Response:
       "status": "success",
       "customer_name": "Placeholder Client",
       "service_name": "Placeholder Plumbing",
-      "job_date": "2026-11-18T12:53:20.157694Z",
-      "paid_at": "2026-11-17T12:53:20.381603Z",
+      "job_date": "2026-11-18T13:14:46.084214Z",
+      "paid_at": "2026-11-17T13:14:46.221304Z",
       "released_at": null,
-      "created_at": "2026-11-17T12:53:20.344740Z",
+      "created_at": "2026-11-17T13:14:46.191177Z",
       "withdrawal_id": null,
       "withdrawal_status": null
     },
@@ -179,10 +179,10 @@ Response:
       "status": "success",
       "customer_name": "Placeholder Client",
       "service_name": "Placeholder Plumbing",
-      "job_date": "2026-11-18T12:53:20.157694Z",
-      "paid_at": "2026-11-14T12:53:20.157694Z",
+      "job_date": "2026-11-18T13:14:46.084214Z",
+      "paid_at": "2026-11-14T13:14:46.084214Z",
       "released_at": null,
-      "created_at": "2026-11-17T12:53:20.204142Z",
+      "created_at": "2026-11-17T13:14:46.105436Z",
       "withdrawal_id": null,
       "withdrawal_status": null
     },
@@ -216,14 +216,14 @@ Response:
   "withdrawals": [
     {
       "id": 1,
-      "reference": "wdr_719f912790044ddcbcd0e2baf0c531c4",
+      "reference": "wdr_9a23832a315c4610a6f79fe9324e443d",
       "amount": "9000.00",
       "currency": "NGN",
       "status": "processing",
       "bank_code": "057",
       "account_number_last4": "0000",
       "account_name": "JANE PLACEHOLDER",
-      "created_at": "2026-11-17T12:53:20.526255Z",
+      "created_at": "2026-11-17T13:14:46.350181Z",
       "completed_at": null
     }
   ]
@@ -241,11 +241,11 @@ Response:
     {
       "payment_id": 1,
       "payment_reference": "PAY-CAP-1",
-      "payout_reference": "wdr_719f912790044ddcbcd0e2baf0c531c4:1",
+      "payout_reference": "wdr_9a23832a315c4610a6f79fe9324e443d:1",
       "amount": "9000.00",
       "gross_amount": "10000.00",
       "platform_fee": "1000.00",
-      "released_at": "2026-11-17T12:53:20.598846Z",
+      "released_at": "2026-11-17T13:14:46.418767Z",
       "booking_reference": "BK-CAP-3",
       "customer_name": "Placeholder Client",
       "withdrawal_id": 1
@@ -257,15 +257,15 @@ Response:
   "withdrawals": [
     {
       "id": 1,
-      "reference": "wdr_719f912790044ddcbcd0e2baf0c531c4",
+      "reference": "wdr_9a23832a315c4610a6f79fe9324e443d",
       "amount": "9000.00",
       "currency": "NGN",
       "status": "success",
       "bank_code": "057",
       "account_number_last4": "0000",
       "account_name": "JANE PLACEHOLDER",
-      "created_at": "2026-11-17T12:53:20.526255Z",
-      "completed_at": "2026-11-17T12:53:20.598846Z"
+      "created_at": "2026-11-17T13:14:46.350181Z",
+      "completed_at": "2026-11-17T13:14:46.418767Z"
     }
   ]
 }
@@ -282,11 +282,11 @@ Response:
     {
       "payment_id": 1,
       "payment_reference": "PAY-CAP-1",
-      "payout_reference": "wdr_719f912790044ddcbcd0e2baf0c531c4:1",
+      "payout_reference": "wdr_9a23832a315c4610a6f79fe9324e443d:1",
       "amount": "9000.00",
       "gross_amount": "10000.00",
       "platform_fee": "1000.00",
-      "released_at": "2026-11-17T12:53:20.598846Z",
+      "released_at": "2026-11-17T13:14:46.418767Z",
       "booking_reference": "BK-CAP-3",
       "customer_name": "Placeholder Client",
       "withdrawal_id": 1
@@ -298,27 +298,27 @@ Response:
   "withdrawals": [
     {
       "id": 2,
-      "reference": "wdr_4d1ff74248904ae5853f06710e266f69",
+      "reference": "wdr_68affe6b99eb4894aeaabc638f86bbcd",
       "amount": "18000.00",
       "currency": "NGN",
       "status": "failed",
       "bank_code": "057",
       "account_number_last4": "0000",
       "account_name": "JANE PLACEHOLDER",
-      "created_at": "2026-11-17T12:53:20.650068Z",
-      "completed_at": "2026-11-17T12:53:20.669413Z"
+      "created_at": "2026-11-17T13:14:46.497180Z",
+      "completed_at": "2026-11-17T13:14:46.526105Z"
     },
     {
       "id": 1,
-      "reference": "wdr_719f912790044ddcbcd0e2baf0c531c4",
+      "reference": "wdr_9a23832a315c4610a6f79fe9324e443d",
       "amount": "9000.00",
       "currency": "NGN",
       "status": "success",
       "bank_code": "057",
       "account_number_last4": "0000",
       "account_name": "JANE PLACEHOLDER",
-      "created_at": "2026-11-17T12:53:20.526255Z",
-      "completed_at": "2026-11-17T12:53:20.598846Z"
+      "created_at": "2026-11-17T13:14:46.350181Z",
+      "completed_at": "2026-11-17T13:14:46.418767Z"
     }
   ]
 }
@@ -365,7 +365,7 @@ Response:
 {
   "success": true,
   "message": "Withdrawal of ₦9,000.00 initiated successfully",
-  "payout_reference": "wdr_719f912790044ddcbcd0e2baf0c531c4",
+  "payout_reference": "wdr_9a23832a315c4610a6f79fe9324e443d",
   "amount": "9000.00",
   "account_number": "0000000000",
   "bank_code": "057",
@@ -400,7 +400,7 @@ Response:
 {
   "success": true,
   "message": "Withdrawal of ₦9,000.00 initiated successfully",
-  "payout_reference": "wdr_719f912790044ddcbcd0e2baf0c531c4",
+  "payout_reference": "wdr_9a23832a315c4610a6f79fe9324e443d",
   "amount": "9000.00",
   "account_number": "0000000000",
   "bank_code": "057",
@@ -471,16 +471,18 @@ Response:
 
 Other statuses the endpoint can return (**NOT VERIFIED LIVE against the running app**; covered by unit tests
 `tests/services/test_withdrawal_service.py`): `400` `We could not verify that bank account. Please check the
-account number and bank.` · `409` `This Idempotency-Key was already used for a different withdrawal request.` ·
+account number and bank.` · `409` `This Idempotency-Key was already used for a different withdrawal request.` (different account, bank **or amount**) ·
 `502` `We could not start your withdrawal right now. Please try again later.` (Paystack rejected the transfer; money
-is back in the balance) · `400` `You have no withdrawable balance right now.`
+is back in the balance) · `400` `The completed jobs that fit your request total ₦X, which is below the minimum payout of ₦5,000.00.` · `400` `You have no withdrawable balance right now.`
 
-State machine (`status`): `processing` → `success` | `failed` | `reversed`. FE behaviour:
+State machine (`status`): `processing` → `success` | `failed` | `reversed` | `needs_review`. FE behaviour:
 * `processing`: show "Withdrawal in progress"; refresh `/wallet/payouts` on screen open/pull-to-refresh (suggested
   every 30 s while the screen is visible; push notifications `withdrawal_success` / `withdrawal_failed` /
   `withdrawal_reversed` also arrive with `data.event`).
 * `failed` / `reversed`: tell the user the money is back in their available balance and let them retry.
 * `success`: money is in the bank.
+* `needs_review`: our team is checking the withdrawal (the provider's report did not match ours). Show "Withdrawal under review"; the money stays out of `available_balance` (it is counted in `pending_withdrawal`) until support resolves it. A `withdrawal_needs_review` push is sent.
+* If the message says `is being processed. We are confirming it with the bank` the provider call did not confirm (timeout/approval pending); the status is still `processing`. Do not tell the user it was sent. An hourly job reconciles these.
 * A request can come back `processing` even after a network timeout on the provider side; do not create a second
   request with a new key, re-send the same key or refresh the list.
 
@@ -495,7 +497,7 @@ Request body:
 {
   "event": "charge.success",
   "data": {
-    "reference": "PAY-26321125320-416",
+    "reference": "PAY-26321131446-981",
     "status": "success",
     "amount": 1500000,
     "currency": "NGN",
@@ -519,7 +521,7 @@ Request body:
 {
   "event": "charge.success",
   "data": {
-    "reference": "PAY-26321125320-416",
+    "reference": "PAY-26321131446-981",
     "status": "success",
     "amount": 1500000,
     "currency": "NGN",
@@ -567,7 +569,7 @@ Request body:
 {
   "event": "charge.success",
   "data": {
-    "reference": "PAY-26321125320-416",
+    "reference": "PAY-26321131446-981",
     "status": "success",
     "amount": 1500000,
     "currency": "NGN",
@@ -589,7 +591,7 @@ Request body:
 {
   "event": "transfer.success",
   "data": {
-    "reference": "wdr_719f912790044ddcbcd0e2baf0c531c4",
+    "reference": "wdr_9a23832a315c4610a6f79fe9324e443d",
     "transfer_code": "TRF_placeholder1",
     "amount": 900000,
     "status": "success"
@@ -611,7 +613,7 @@ Request body:
 {
   "event": "transfer.success",
   "data": {
-    "reference": "wdr_719f912790044ddcbcd0e2baf0c531c4",
+    "reference": "wdr_9a23832a315c4610a6f79fe9324e443d",
     "transfer_code": "TRF_placeholder1",
     "amount": 900000,
     "status": "success"
@@ -633,7 +635,7 @@ Request body:
 {
   "event": "transfer.failed",
   "data": {
-    "reference": "wdr_4d1ff74248904ae5853f06710e266f69",
+    "reference": "wdr_68affe6b99eb4894aeaabc638f86bbcd",
     "transfer_code": "TRF_placeholder2",
     "amount": 1800000,
     "reason": "Recipient bank unavailable"
@@ -684,7 +686,7 @@ Response:
 | `transfer.success`, `transfer.failed` webhooks incl. redelivery and balance effects | Verified live (webhook signed by the capture script with a placeholder secret) |
 | `POST /payments/{id}/release` → 403 | Verified live |
 | Real Paystack round trips (initialize, transfer, bank resolve), real webhook payload shapes/signatures | NOT VERIFIED LIVE: needs a real Paystack account; shapes follow Paystack docs, bodies the app returns are what is captured |
-| `transfer.reversed` (also after success), ambiguous timeout/5xx, transfer `otp` status | NOT VERIFIED LIVE: covered by unit/integration tests only |
+| `transfer.reversed` (also after success), ambiguous timeout/5xx, transfer `otp` status, `needs_review` states, the hourly reconcile job | NOT VERIFIED LIVE: covered by unit/integration tests only |
 | Idempotent double tap under true concurrency (two DB sessions) | Verified by automated test (`tests/services/test_withdrawal_service.py`), not via HTTP |
 | Hourly auto-confirm task and its notifications | NOT VERIFIED LIVE (Celery beat not run); verified by automated tests |
 | Review notifications, push delivery (FCM) | NOT VERIFIED LIVE: notification enqueue only; no FCM device |

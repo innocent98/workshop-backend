@@ -14,7 +14,7 @@ Money invariants
 import json
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import List, Optional
 from uuid import UUID
@@ -107,15 +107,25 @@ def available_balance(db: Session, artisan_id: UUID) -> Decimal:
 
 
 def pending_withdrawal_amount(db: Session, artisan_id: UUID) -> Decimal:
-    total = (
+    """Money in flight: processing withdrawals + needs_review ones still holding payments."""
+    processing = (
         db.query(func.sum(Withdrawal.amount))
         .filter(
             Withdrawal.artisan_id == artisan_id,
             Withdrawal.status == WithdrawalStatus.PROCESSING,
         )
         .scalar()
-    )
-    return total or Decimal("0")
+    ) or Decimal("0")
+    in_review = (
+        db.query(func.sum(Payment.artisan_amount))
+        .join(Withdrawal, Withdrawal.id == Payment.withdrawal_id)
+        .filter(
+            Withdrawal.artisan_id == artisan_id,
+            Withdrawal.status == WithdrawalStatus.NEEDS_REVIEW,
+        )
+        .scalar()
+    ) or Decimal("0")
+    return processing + in_review
 
 
 def select_payments(payments: List[Payment], requested: Decimal) -> List[Payment]:
@@ -162,8 +172,14 @@ def _find_by_key(db: Session, artisan_id: UUID, key: str) -> Optional[Withdrawal
     )
 
 
-def _replay(db: Session, existing: Withdrawal, account_number: str, bank_code: str):
-    if existing.account_number_last4 != account_number[-4:] or existing.bank_code != bank_code:
+def _replay(
+    db: Session, existing: Withdrawal, account_number: str, bank_code: str, amount: Decimal
+):
+    if (
+        existing.account_number_last4 != account_number[-4:]
+        or existing.bank_code != bank_code
+        or (existing.requested_amount is not None and existing.requested_amount != amount)
+    ):
         raise WithdrawalError(
             409, "This Idempotency-Key was already used for a different withdrawal request."
         )
@@ -188,7 +204,7 @@ def request_withdrawal(
     if idempotency_key:
         existing = _find_by_key(db, artisan_id, idempotency_key)
         if existing:
-            return _replay(db, existing, account_number, bank_code)
+            return _replay(db, existing, account_number, bank_code, amount)
 
     # Fast, unlocked feasibility check so we do not call Paystack for hopeless requests.
     candidates = eligible_payments_query(db, artisan_id).all()
@@ -258,7 +274,7 @@ def _create_locked(
         if idempotency_key:
             existing = _find_by_key(db, artisan_id, idempotency_key)
             if existing:
-                result = _replay(db, existing, account_number, bank_code)
+                result = _replay(db, existing, account_number, bank_code, amount)
                 db.rollback()
                 return result
 
@@ -272,6 +288,7 @@ def _create_locked(
         withdrawal = Withdrawal(
             artisan_id=artisan_id,
             amount=total,
+            requested_amount=amount,
             currency="NGN",
             status=WithdrawalStatus.PROCESSING,
             reference=f"wdr_{uuid.uuid4().hex}",
@@ -329,12 +346,14 @@ def _initiate_transfer(db: Session, withdrawal_id: int) -> WithdrawalResult:
     db.commit()
 
     if transfer_status == "otp":
+        # The transfer EXISTS at Paystack (it just needs approval). Freeing the payments here
+        # could pay the artisan twice, so keep PROCESSING and flag it (reconcile/ops resolve it).
         logger.error(
-            f"Paystack transfer {reference} needs OTP approval; "
-            "disable transfer OTP in the Paystack dashboard. Reverting withdrawal."
+            f"Paystack transfer {reference} is waiting for OTP approval; disable transfer OTP in "
+            "the Paystack dashboard. Withdrawal left PROCESSING."
         )
-        fail_withdrawal(db, withdrawal_id, WithdrawalStatus.FAILED, "transfer requires OTP")
-        raise WithdrawalError(502, GENERIC_PAYSTACK_ERROR)
+        withdrawal.failure_reason = "transfer awaiting OTP approval at Paystack"
+        db.commit()
     if transfer_status == "success":
         settle_transfer_success(db, {**transfer, "reference": reference})
     withdrawal = db.get(Withdrawal, withdrawal_id)
@@ -367,31 +386,60 @@ def _linked_payments(db: Session, withdrawal_id: int) -> List[Payment]:
     return db.query(Payment).filter(Payment.withdrawal_id == withdrawal_id).with_for_update().all()
 
 
+def _mark_needs_review(db: Session, withdrawal: Withdrawal, reason: str) -> str:
+    """Freeze a withdrawal whose money state is unclear. Payments are left untouched."""
+    logger.error(f"Withdrawal {withdrawal.reference} needs review: {reason}")
+    withdrawal.status = WithdrawalStatus.NEEDS_REVIEW
+    withdrawal.failure_reason = reason[:500]
+    artisan_id, amount, withdrawal_id = withdrawal.artisan_id, withdrawal.amount, withdrawal.id
+    db.commit()
+    notify_user(
+        artisan_id,
+        "Withdrawal under review",
+        f"Your withdrawal of {naira(amount)} is being reviewed by our team. "
+        "We will update you shortly.",
+        {"event": "withdrawal_needs_review", "withdrawal_id": str(withdrawal_id)},
+    )
+    return "needs_review"
+
+
 def settle_transfer_success(db: Session, data: dict) -> str:
-    """transfer.success: withdrawal SUCCESS, linked payments RELEASED. Idempotent."""
+    """
+    transfer.success: withdrawal SUCCESS, linked payments RELEASED. Idempotent.
+
+    Anything unclear is frozen as NEEDS_REVIEW instead of being ignored: a success arriving after
+    we freed the payments (FAILED/REVERSED) means the artisan may be paid twice, and a missing or
+    different amount/currency means we cannot trust the match.
+    """
     withdrawal = _lock_withdrawal(db, data)
     if withdrawal is None:
         db.rollback()
         return "not_found"
-    if withdrawal.status == WithdrawalStatus.SUCCESS:
+    if withdrawal.status in (WithdrawalStatus.SUCCESS, WithdrawalStatus.NEEDS_REVIEW):
         db.rollback()
         return "already_processed"
-    if withdrawal.status != WithdrawalStatus.PROCESSING:
-        logger.error(
-            f"transfer.success for withdrawal {withdrawal.reference} in status "
-            f"{withdrawal.status.value}; ignored, needs manual review"
+    if withdrawal.status in (WithdrawalStatus.FAILED, WithdrawalStatus.REVERSED):
+        return _mark_needs_review(
+            db,
+            withdrawal,
+            f"transfer.success received after the withdrawal was marked {withdrawal.status.value}; "
+            "the payments were freed, check for a double payout",
         )
-        db.rollback()
-        return "ignored"
 
     paystack_amount = data.get("amount")
-    if paystack_amount is not None and int(paystack_amount) != naira_to_kobo(withdrawal.amount):
-        logger.error(
-            f"transfer.success amount {paystack_amount} != withdrawal "
-            f"{withdrawal.reference} amount {withdrawal.amount}; not settled"
+    currency = data.get("currency")
+    if paystack_amount is None:
+        return _mark_needs_review(db, withdrawal, "transfer.success carried no amount")
+    if int(paystack_amount) != naira_to_kobo(withdrawal.amount):
+        return _mark_needs_review(
+            db,
+            withdrawal,
+            f"transfer.success amount {paystack_amount} kobo != withdrawal {withdrawal.amount}",
         )
-        db.rollback()
-        return "mismatch"
+    if currency and str(currency).upper() != str(withdrawal.currency).upper():
+        return _mark_needs_review(
+            db, withdrawal, f"transfer.success currency {currency} != {withdrawal.currency}"
+        )
 
     now = _now()
     withdrawal.status = WithdrawalStatus.SUCCESS
@@ -477,3 +525,66 @@ def settle_transfer_failure(db: Session, data: dict, new_status: WithdrawalStatu
         return "not_found"
     reason = data.get("reason") or data.get("message") or data.get("status")
     return _apply_failure(db, withdrawal, new_status, str(reason) if reason else None)
+
+
+# --------------------------------------------------------------------------- reconciliation
+
+RECONCILE_AFTER_MINUTES = 10
+_FAILED_STATUSES = {"failed", "rejected", "blocked", "abandoned"}
+_IN_FLIGHT_STATUSES = {"pending", "received", "queued", "processing", "otp"}
+
+
+def reconcile_processing_withdrawals(db: Session, now: Optional[datetime] = None) -> dict:
+    """
+    Settle withdrawals stuck in PROCESSING (webhook never arrived, or the transfer call timed out).
+
+    For each PROCESSING withdrawal older than RECONCILE_AFTER_MINUTES, ask Paystack
+    (``GET /transfer/verify/:reference``) and apply the same settle/fail functions the webhooks use.
+    Paystack saying the transfer does not exist (404) means it was never created: fail + unlink.
+    Pending/otp/unknown answers and network errors leave the withdrawal untouched for the next run.
+    """
+    cutoff = (now or _now()) - timedelta(minutes=RECONCILE_AFTER_MINUTES)
+    rows = (
+        db.query(Withdrawal.id, Withdrawal.reference)
+        .filter(Withdrawal.status == WithdrawalStatus.PROCESSING, Withdrawal.created_at <= cutoff)
+        .order_by(Withdrawal.id)
+        .all()
+    )
+    db.rollback()  # no transaction (or locks) held while we talk to Paystack
+    summary = {"checked": len(rows), "success": 0, "failed": 0, "not_found": 0, "left": 0}
+
+    for withdrawal_id, reference in rows:
+        try:
+            data = PaystackService.verify_transfer(reference)
+        except PaystackError as exc:
+            if exc.status_code == 404:
+                logger.error(
+                    f"Withdrawal {reference}: transfer does not exist at Paystack, failing"
+                )
+                fail_withdrawal(
+                    db, withdrawal_id, WithdrawalStatus.FAILED, "transfer not found at Paystack"
+                )
+                summary["not_found"] += 1
+            else:
+                logger.warning(f"Could not verify transfer {reference}: {exc}")
+                summary["left"] += 1
+            continue
+
+        status = (data.get("status") or "").lower()
+        payload = {**data, "reference": reference}
+        if status == "success":
+            settle_transfer_success(db, payload)
+            summary["success"] += 1
+        elif status in _FAILED_STATUSES:
+            settle_transfer_failure(db, payload, WithdrawalStatus.FAILED)
+            summary["failed"] += 1
+        elif status == "reversed":
+            settle_transfer_failure(db, payload, WithdrawalStatus.REVERSED)
+            summary["failed"] += 1
+        else:
+            if status == "otp":
+                logger.error(f"Transfer {reference} is still waiting for OTP approval")
+            elif status not in _IN_FLIGHT_STATUSES:
+                logger.warning(f"Transfer {reference} has unrecognised status '{status}'")
+            summary["left"] += 1
+    return summary

@@ -13,6 +13,7 @@ celery_app = Celery(
         "app.tasks.email_tasks",
         "app.tasks.notification_tasks",
         "app.tasks.booking_tasks",
+        "app.tasks.withdrawal_tasks",
     ],
 )
 
@@ -46,6 +47,11 @@ celery_app.conf.beat_schedule = {
     # Confirm completed jobs the client never confirmed/disputed within the window
     "auto-confirm-completed-bookings": {
         "task": "app.tasks.booking_tasks.auto_confirm_completed_bookings",
+        "schedule": 3600.0,  # Every hour
+    },
+    # Settle withdrawals stuck in PROCESSING (webhook lost / transfer call timed out)
+    "reconcile-processing-withdrawals": {
+        "task": "app.tasks.withdrawal_tasks.reconcile_withdrawals",
         "schedule": 3600.0,  # Every hour
     },
 }

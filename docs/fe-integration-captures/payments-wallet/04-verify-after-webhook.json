@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "GET",
-    "path": "/api/v1/payments/verify/PAY-26321125320-416",
+    "path": "/api/v1/payments/verify/PAY-26321131446-981",
     "headers": {
       "Authorization": "Bearer <client access token>"
     },
@@ -10,7 +10,7 @@
   "response": {
     "status": 200,
     "body": {
-      "payment_reference": "PAY-26321125320-416",
+      "payment_reference": "PAY-26321131446-981",
       "status": "success",
       "amount": "15000.00",
       "paid": true,

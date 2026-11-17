@@ -92,6 +92,9 @@ def client(db):
     app.dependency_overrides.clear()
 
 
+from app.services.paystack import PaystackError  # noqa: E402
+
+
 class FakePaystack:
     """Stand-in for the Paystack transfer API (set ``transfer_error`` / ``transfer_status``)."""
 
@@ -103,6 +106,8 @@ class FakePaystack:
         self.recipient_error = None
         self.transfer_error = None
         self.transfer_status = "pending"
+        self.transfer_verify = {}  # reference -> verify payload (or an Exception to raise)
+        self.transfer_verify_calls = []
 
     def verify_account_number(self, account_number, bank_code):
         self.verify_calls.append((account_number, bank_code))
@@ -115,6 +120,13 @@ class FakePaystack:
         if self.recipient_error:
             raise self.recipient_error
         return {"recipient_code": "RCP_test123"}
+
+    def verify_transfer(self, reference):
+        self.transfer_verify_calls.append(reference)
+        result = self.transfer_verify.get(reference, PaystackError("Transfer not found", 404))
+        if isinstance(result, Exception):
+            raise result
+        return {"reference": reference, "currency": "NGN", **result}
 
     def initiate_transfer(self, recipient_code, amount, reason, reference):
         self.transfer_calls.append(
@@ -142,4 +154,5 @@ def paystack(monkeypatch):
         PaystackService, "create_transfer_recipient", staticmethod(fake.create_transfer_recipient)
     )
     monkeypatch.setattr(PaystackService, "initiate_transfer", staticmethod(fake.initiate_transfer))
+    monkeypatch.setattr(PaystackService, "verify_transfer", staticmethod(fake.verify_transfer))
     return fake

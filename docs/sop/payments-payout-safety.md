@@ -47,7 +47,8 @@ A code audit found real defects in the money paths:
    - The Paystack transfer `reference` is our own `wdr_<uuid>`, so a retry can never double-pay.
    - Outcome handling: 4xx from Paystack = definitive rejection → withdrawal `failed`, payments unlinked, client
      gets a generic `502`. Timeout/5xx = outcome unknown → stays `processing` (the webhook settles it). Transfer
-     status `otp` → reverted + ERROR log (Paystack transfer OTP must be disabled in the dashboard).
+     status `otp` → the transfer EXISTS at Paystack, so the withdrawal stays `processing` (payments stay locked) with an
+     ERROR log (Paystack transfer OTP must be disabled in the dashboard); freeing the payments there could pay twice.
    - `MIN_PAYOUT_NGN` (default `5000`) applies to the *requested* amount AND to the actual transfer total
      (whole-payment selection that would transfer less than the minimum is a 400, before Paystack is called).
      The response `amount` is the **actual** transfer total; `requested_amount` is echoed. If nothing fits: `400` naming the nearest withdrawable amount
@@ -83,6 +84,22 @@ A code audit found real defects in the money paths:
 per-payment ledger); holding the DB lock across the Paystack call (would block the artisan's row for seconds);
 a PG enum for withdrawal status (needs `ALTER TYPE` for every change).
 
+## Review round 2 (Opus review of PR #2), all fixed
+
+| Finding | Fix |
+|---|---|
+| Stuck money: timeout / 5xx / `status:false` left a withdrawal `processing` forever | Hourly beat task `reconcile_withdrawals` (`app/tasks/withdrawal_tasks.py`, `reconcile_processing_withdrawals`): for `processing` withdrawals older than 10 min call `GET /transfer/verify/:reference` (`PaystackService.verify_transfer`) and apply the same settle/fail functions as the webhooks; a Paystack 404 means the transfer never existed, so fail + unlink; pending/otp/unknown/errors are left for the next run. The payout response no longer says "initiated successfully" unless Paystack confirmed a `transfer_code`; otherwise `status: processing` with an honest "confirming with the bank" message |
+| Double payout on `otp` | `otp` keeps the withdrawal `processing` (see above) |
+| `transfer.success` ignored after `failed`/`reversed` | New status `needs_review`: payments untouched, ERROR log, artisan notified; money still linked to a `needs_review` withdrawal is reported in `pending_withdrawal`, never as available |
+| `transfer.success` amount/currency | Missing amount, different amount, or different currency (when present) all go to `needs_review` instead of settling |
+| Idempotency replay ignored the amount | `withdrawals.requested_amount` stored; same key with another amount is `409` |
+| Re-initialised FAILED payment lost its old reference | `payment_references` table keeps old references; webhook and verify resolve them. A `charge.failed` for an old reference never fails the current attempt. A second successful charge on a different reference is flagged `needs_refund` |
+| Success on a CANCELLED/REJECTED booking only warned | `payments.needs_refund = true` (admin refunds; the admin stream should list `needs_refund` payments) |
+| Blocking work on the event loop | `request_payout`, `verify_payment`, `initialize_payment` are plain `def` (threadpool); the webhook keeps `async` only to read the raw body and runs the DB work in `run_in_threadpool` |
+
+Schema (same migration `c8a1d2e3f4b5`, still unmerged): `withdrawals.requested_amount`, `payments.needs_refund`,
+table `payment_references`. `needs_review` fits the existing `VARCHAR(20)` status column (no migration for the value).
+
 ## What's involved
 
 | Area | Path |
@@ -93,7 +110,7 @@ a PG enum for withdrawal status (needs `ALTER TYPE` for every change).
 | Endpoints | `app/api/v1/endpoints/payments.py` (verify, webhook, release), `app/api/v1/endpoints/wallet.py`, `app/schemas/wallet.py` |
 | Paystack client | `app/services/paystack.py` (`recipient`/`transfer` now raise `PaystackError` with the HTTP status) |
 | Notifications | `app/services/notify.py`, `app/api/v1/endpoints/reviews.py` |
-| Task | `app/tasks/booking_tasks.py`, `app/celery_app.py` |
+| Tasks | `app/tasks/booking_tasks.py`, `app/tasks/withdrawal_tasks.py`, `app/celery_app.py` |
 | Rate limit | `app/core/rate_limit.py`, `app/main.py`, `app/api/v1/endpoints/auth.py` |
 | Config | `MIN_PAYOUT_NGN`, `RATE_LIMIT_STORAGE_URI` in `app/core/config.py` |
 | CI / tests | `.github/workflows/ci.yml`, `.flake8`, `tests/` |
@@ -119,12 +136,12 @@ a PG enum for withdrawal status (needs `ALTER TYPE` for every change).
 - **Roll back code:** revert the PR; `withdrawals` rows are inert to old code, but old code will not honour
   `withdrawal_id` (in-flight payouts would look available), so only roll back when no withdrawal is `processing`.
 - **Roll back schema:** `alembic downgrade f7b8c9d0e1f2` (drops `payments.withdrawal_id` and `withdrawals`).
-- **Stuck `processing` withdrawals** (webhook never arrived): check the Paystack transfer by `reference`, then call
-  the settle logic or fix the row by hand; there is no automatic reconciliation yet (follow-up).
+- **Stuck `processing` withdrawals**: the hourly `reconcile_withdrawals` task resolves them (10 min age threshold);
+  `needs_review` ones need a human: check the transfer in Paystack by `reference` and fix the row.
 
 ## Follow-ups
 
-- Reconciliation job for withdrawals stuck in `processing` (poll `GET /transfer/verify/:reference`).
+- Admin tooling to resolve `needs_review` withdrawals and refund `needs_refund` payments (flags exist, no endpoint yet).
 - Admin-only manual release / refund flows (admin stream) must go through the same withdrawal ledger.
 - Repo-wide `black`/`flake8` baseline is red on `main` (59 files); lint job stays red until a format-only PR.
 - Webhook IP allow-listing / replay-window check is not implemented (signature only).

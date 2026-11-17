@@ -9,7 +9,7 @@
     "body": {
       "event": "charge.success",
       "data": {
-        "reference": "PAY-26321125320-416",
+        "reference": "PAY-26321131446-981",
         "status": "success",
         "amount": 1500000,
         "currency": "NGN",

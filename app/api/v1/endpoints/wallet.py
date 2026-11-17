@@ -376,7 +376,7 @@ async def get_wallet_stats(
 
 
 @router.post("/payout/request", response_model=RequestPayoutResponse)
-async def request_payout(
+def request_payout(
     request: RequestPayoutRequest,
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
     current_user: User = Depends(get_current_user),
@@ -413,11 +413,19 @@ async def request_payout(
         raise HTTPException(status_code=exc.status_code, detail=exc.detail)
 
     withdrawal = result.withdrawal
-    message = (
-        f"Withdrawal of ₦{withdrawal.amount:,.2f} initiated successfully"
-        if withdrawal.status.value == "processing"
-        else f"Withdrawal of ₦{withdrawal.amount:,.2f} is {withdrawal.status.value}"
-    )
+    amount_text = f"₦{withdrawal.amount:,.2f}"
+    if withdrawal.status.value == "processing":
+        if withdrawal.transfer_code and not withdrawal.failure_reason:
+            message = f"Withdrawal of {amount_text} initiated successfully"
+        else:
+            # The transfer call timed out / errored or is awaiting approval: we do not yet know
+            # that it went through, so do not claim it did.
+            message = (
+                f"Your withdrawal of {amount_text} is being processed. We are confirming it "
+                "with the bank and will notify you when it completes."
+            )
+    else:
+        message = f"Withdrawal of {amount_text} is {withdrawal.status.value}"
     return {
         "success": withdrawal.status.value in ("processing", "success"),
         "message": message,
@@ -428,7 +436,7 @@ async def request_payout(
         "status": withdrawal.status.value,
         # additive fields
         "withdrawal_id": withdrawal.id,
-        "requested_amount": request.amount,
+        "requested_amount": withdrawal.requested_amount or request.amount,
         "payments_count": result.payments_count,
         "idempotent_replay": result.replay,
     }

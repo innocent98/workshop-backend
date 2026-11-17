@@ -293,6 +293,29 @@ class PaystackService:
             raise PaystackError(f"Paystack API request failed: {str(e)}")
 
     @classmethod
+    def verify_transfer(cls, reference: str) -> Dict:
+        """
+        Fetch a transfer by OUR reference (GET /transfer/verify/:reference).
+
+        Returns the transfer data (``status``: success | pending | otp | failed | reversed ...).
+        Raises PaystackError with ``status_code == 404`` when the transfer does not exist,
+        and without a status code on network errors.
+        """
+        url = f"{cls.BASE_URL}/transfer/verify/{reference}"
+        try:
+            response = requests.get(url, headers=cls._get_headers(), timeout=30)
+            _raise_for_http_error(response, "Transfer verification failed")
+            data = response.json()
+            if not data.get("status"):
+                raise PaystackError(
+                    data.get("message", "Transfer verification failed"),
+                    status_code=response.status_code,
+                )
+            return data["data"]
+        except requests.RequestException as e:
+            raise PaystackError(f"Paystack API request failed: {str(e)}")
+
+    @classmethod
     def get_banks(cls) -> Dict:
         """
         Get list of supported banks.

@@ -13,14 +13,14 @@
     "status": 201,
     "body": {
       "id": 5,
-      "payment_reference": "PAY-26321125320-416",
+      "payment_reference": "PAY-26321131446-981",
       "booking_id": 4,
       "authorization_url": "https://checkout.paystack.com/placeholder",
       "amount": "15000.00",
       "platform_fee": "1500.00",
       "artisan_amount": "13500.00",
       "status": "pending",
-      "created_at": "2026-11-17T12:53:20.344740Z"
+      "created_at": "2026-11-17T13:14:46.191177Z"
     }
   }
 }

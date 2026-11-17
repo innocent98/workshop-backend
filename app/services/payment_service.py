@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.core.logger import logger
 from app.db.models.booking import Booking, BookingStatus
-from app.db.models.payment import Payment, PaymentMethod, PaymentStatus
+from app.db.models.payment import Payment, PaymentMethod, PaymentReference, PaymentStatus
 from app.services.notify import notify_user
 
 # Paystack channel -> our PaymentMethod. Anything unknown falls back to OTHER.
@@ -62,10 +62,31 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def find_payment_by_reference(db: Session, reference: str, lock: bool = False) -> Optional[Payment]:
+    """Find a payment by its current reference, or by any earlier reference it had."""
+
+    def _query(*criteria):
+        q = db.query(Payment).filter(*criteria)
+        return q.with_for_update() if lock else q
+
+    payment = _query(Payment.payment_reference == reference).first()
+    if payment is None:
+        alias = db.query(PaymentReference).filter(PaymentReference.reference == reference).first()
+        if alias is not None:
+            payment = _query(Payment.id == alias.payment_id).first()
+    return payment
+
+
+def archive_payment_reference(db: Session, payment: Payment) -> None:
+    """Remember the payment's current reference(s) before they are replaced (no commit)."""
+    for ref in {payment.payment_reference, payment.paystack_reference} - {None}:
+        exists = db.query(PaymentReference.id).filter(PaymentReference.reference == ref).first()
+        if not exists:
+            db.add(PaymentReference(payment_id=payment.id, reference=ref))
+
+
 def _lock_payment(db: Session, reference: str) -> Optional[Payment]:
-    return (
-        db.query(Payment).filter(Payment.payment_reference == reference).with_for_update().first()
-    )
+    return find_payment_by_reference(db, reference, lock=True)
 
 
 def charge_matches_payment(payment: Payment, data: dict) -> bool:
@@ -96,7 +117,18 @@ def apply_charge_success(db: Session, reference: str, data: dict) -> ChargeResul
     booking = db.query(Booking).filter(Booking.id == payment.booking_id).with_for_update().first()
 
     if payment.status in (PaymentStatus.SUCCESS, PaymentStatus.RELEASED, PaymentStatus.REFUNDED):
-        db.rollback()  # release row locks, nothing to change
+        settled_ref = payment.paystack_reference
+        paid_ref = data.get("reference")
+        if settled_ref and paid_ref and paid_ref != settled_ref and not payment.needs_refund:
+            # A different checkout (reference) was charged for an already-paid payment.
+            logger.error(
+                f"Duplicate charge: payment {payment.id} already settled via {settled_ref}, "
+                f"Paystack now reports success for {paid_ref}; flagged needs_refund"
+            )
+            payment.needs_refund = True
+            db.commit()
+        else:
+            db.rollback()  # release row locks, nothing to change
         return ChargeResult(OUTCOME_ALREADY, payment, booking)
 
     if not charge_matches_payment(payment, data):
@@ -126,6 +158,10 @@ def apply_charge_success(db: Session, reference: str, data: dict) -> ChargeResul
             f"Payment {reference} succeeded but booking {booking.id} is "
             f"{booking.status.value}; booking left unchanged"
         )
+        if booking.status in (BookingStatus.CANCELLED, BookingStatus.REJECTED):
+            # Money was taken for a booking that no longer exists: an admin must refund it.
+            logger.error(f"Payment {payment.id} succeeded on a {booking.status.value} booking")
+            payment.needs_refund = True
 
     db.commit()
 
@@ -146,6 +182,10 @@ def apply_charge_failed(db: Session, reference: str, data: dict) -> ChargeResult
         return ChargeResult(OUTCOME_NOT_FOUND)
 
     if payment.status not in (PaymentStatus.PENDING, PaymentStatus.PROCESSING):
+        db.rollback()
+        return ChargeResult(OUTCOME_IGNORED, payment)
+    if reference not in (payment.payment_reference, payment.paystack_reference):
+        # A failure of an OLD checkout must not fail the payment's current attempt.
         db.rollback()
         return ChargeResult(OUTCOME_IGNORED, payment)
 

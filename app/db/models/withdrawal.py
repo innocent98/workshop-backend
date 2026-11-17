@@ -17,6 +17,9 @@ class WithdrawalStatus(str, enum.Enum):
     SUCCESS = "success"  # transfer.success received, money left the platform
     FAILED = "failed"  # transfer.failed / initiation rejected, funds back in balance
     REVERSED = "reversed"  # transfer.reversed, funds back in balance
+    # Money state is unclear (e.g. transfer.success after we freed the payments, or an amount
+    # mismatch): payments stay as they are, an admin must resolve it.
+    NEEDS_REVIEW = "needs_review"
 
 
 class Withdrawal(Base):
@@ -42,6 +45,7 @@ class Withdrawal(Base):
     )
 
     amount = Column(DECIMAL(12, 2), nullable=False)  # exact amount transferred
+    requested_amount = Column(DECIMAL(12, 2), nullable=True)  # what the artisan asked for
     currency = Column(String(3), nullable=False, default="NGN", server_default="NGN")
     status = Column(
         SQLEnum(

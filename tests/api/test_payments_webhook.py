@@ -190,3 +190,40 @@ def test_transfer_webhooks_end_to_end(client, db, paystack):
     db.expire_all()
     assert db.get(type(w), w.id).status == WithdrawalStatus.REVERSED
     assert db.get(type(payment), payment.id).status == PaymentStatus.SUCCESS
+
+
+def test_reinitialised_payment_still_accepts_a_late_charge_on_the_old_reference(
+    client, db, pending_payment, monkeypatch
+):
+    from app.api.deps import get_current_user
+    from app.db.models.user import User
+    from app.main import app
+
+    booking, payment = pending_payment
+    old_ref, customer_id = payment.payment_reference, booking.customer_id
+    _post(client, "charge.failed", {"reference": old_ref, "status": "failed"})
+
+    monkeypatch.setattr(
+        PaystackService,
+        "initialize_transaction",
+        staticmethod(
+            lambda **kw: {
+                "reference": kw["reference"],
+                "access_code": "ac",
+                "authorization_url": "https://pay.example/x",
+            }
+        ),
+    )
+    app.dependency_overrides[get_current_user] = lambda: db.get(User, customer_id)
+    try:
+        r = client.post("/api/v1/payments/initialize", json={"booking_id": booking.id})
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+    assert r.status_code == 201
+    new_ref = r.json()["payment_reference"]
+    assert new_ref != old_ref
+
+    late = _post(client, "charge.success", _charge(payment, reference=old_ref))
+    assert late.json() == {"status": "success", "message": "Payment processed"}
+    db.expire_all()
+    assert db.get(type(booking), booking.id).status == BookingStatus.PAID

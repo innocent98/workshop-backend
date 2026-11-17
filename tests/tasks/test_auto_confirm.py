@@ -69,9 +69,7 @@ def test_is_idempotent(db, notifications):
 
 def test_respects_explicit_now(db):
     artisan, customer, service = _world(db)
-    make_booking(
-        db, artisan, customer, service, status=BookingStatus.COMPLETED, deadline_hours=5
-    )
+    make_booking(db, artisan, customer, service, status=BookingStatus.COMPLETED, deadline_hours=5)
     db.commit()
     assert auto_confirm_due_bookings(db) == 0
     assert auto_confirm_due_bookings(db, now=datetime.now(timezone.utc) + timedelta(hours=6)) == 1

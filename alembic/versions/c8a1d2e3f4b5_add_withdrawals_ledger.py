@@ -29,8 +29,9 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.Column("amount", sa.DECIMAL(12, 2), nullable=False),
+        sa.Column("requested_amount", sa.DECIMAL(12, 2), nullable=True),
         sa.Column("currency", sa.String(3), nullable=False, server_default="NGN"),
-        # processing | success | failed | reversed (VARCHAR, not a PG enum: easy to extend)
+        # processing | success | failed | reversed | needs_review (VARCHAR, not a PG enum: easy to extend)
         sa.Column("status", sa.String(20), nullable=False),
         sa.Column("reference", sa.String(64), nullable=False),
         sa.Column("idempotency_key", sa.String(100), nullable=True),
@@ -68,8 +69,37 @@ def upgrade() -> None:
     )
     op.create_index("ix_payments_withdrawal_id", "payments", ["withdrawal_id"])
 
+    op.add_column(
+        "payments",
+        sa.Column("needs_refund", sa.Boolean(), nullable=False, server_default=sa.false()),
+    )
+
+    op.create_table(
+        "payment_references",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column(
+            "payment_id",
+            sa.Integer(),
+            sa.ForeignKey("payments.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column("reference", sa.String(255), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+    )
+    op.create_index("ix_payment_references_payment_id", "payment_references", ["payment_id"])
+    op.create_index(
+        "ix_payment_references_reference", "payment_references", ["reference"], unique=True
+    )
+
 
 def downgrade() -> None:
+    op.drop_index("ix_payment_references_reference", table_name="payment_references")
+    op.drop_index("ix_payment_references_payment_id", table_name="payment_references")
+    op.drop_table("payment_references")
+    op.drop_column("payments", "needs_refund")
+
     op.drop_index("ix_payments_withdrawal_id", table_name="payments")
     op.drop_constraint("fk_payments_withdrawal_id", "payments", type_="foreignkey")
     op.drop_column("payments", "withdrawal_id")

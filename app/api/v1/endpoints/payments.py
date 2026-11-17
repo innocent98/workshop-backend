@@ -2,6 +2,7 @@
 Payment endpoints for managing Paystack transactions.
 """
 from typing import Optional
+from starlette.concurrency import run_in_threadpool
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Header
 from sqlalchemy.orm import Session
 import json
@@ -31,6 +32,8 @@ from app.services.payment_service import (
     OUTCOME_NOT_FOUND,
     apply_charge_failed,
     apply_charge_success,
+    archive_payment_reference,
+    find_payment_by_reference,
 )
 from app.services.withdrawal_service import settle_transfer_failure, settle_transfer_success
 from app.tasks.notification_tasks import send_push_notification
@@ -64,7 +67,7 @@ def _notify_user(user_id, title: str, body: str, data: Optional[dict] = None) ->
 
 
 @router.post("/initialize", response_model=InitializePaymentResponse, status_code=status.HTTP_201_CREATED)
-async def initialize_payment(
+def initialize_payment(
     request: InitializePaymentRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -169,6 +172,8 @@ async def initialize_payment(
 
         # If an existing failed/refunded record exists, reuse it for a new checkout attempt.
         if existing_payment and existing_payment.status in [PaymentStatus.FAILED, PaymentStatus.REFUNDED]:
+            # keep the old reference(s): a late charge.success for them must still find this payment
+            archive_payment_reference(db, existing_payment)
             existing_payment.payment_reference = payment_reference
             existing_payment.paystack_reference = paystack_response.get('reference')
             existing_payment.paystack_access_code = paystack_response.get('access_code')
@@ -236,7 +241,7 @@ async def initialize_payment(
 
 
 @router.get("/verify/{reference}", response_model=VerifyPaymentResponse)
-async def verify_payment(
+def verify_payment(
     reference: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -247,7 +252,7 @@ async def verify_payment(
     Checks with Paystack and updates local payment record.
     """
     # Get payment by reference
-    payment = db.query(Payment).filter(Payment.payment_reference == reference).first()
+    payment = find_payment_by_reference(db, reference)
     if not payment:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -334,40 +339,8 @@ async def verify_payment(
     }
 
 
-@router.post("/webhook", status_code=status.HTTP_200_OK)
-async def paystack_webhook(
-    request: Request,
-    x_paystack_signature: Optional[str] = Header(None),
-    db: Session = Depends(get_db)
-):
-    """
-    Paystack webhook handler.
-
-    Processes payment notifications from Paystack.
-    No authentication required (verified via signature).
-    """
-    # Get raw body for signature verification
-    body = await request.body()
-
-    # Verify webhook signature
-    if not x_paystack_signature or not PaystackService.verify_webhook_signature(x_paystack_signature, body):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid webhook signature"
-        )
-
-    # Parse webhook payload
-    try:
-        payload = json.loads(body)
-    except json.JSONDecodeError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid JSON payload"
-        )
-
-    event = payload.get('event')
-    data = payload.get('data') or {}
-
+def _handle_webhook_event(db: Session, event: Optional[str], data: dict) -> dict:
+    """Blocking part of the webhook (DB locks, row updates): runs in the threadpool."""
     if event == 'charge.success':
         reference = data.get('reference')
         if not reference:
@@ -403,6 +376,42 @@ async def paystack_webhook(
         return {"status": "success", "message": f"Transfer {outcome}"}
 
     return {"status": "ignored", "message": f"Unhandled event: {event}"}
+
+
+@router.post("/webhook", status_code=status.HTTP_200_OK)
+async def paystack_webhook(
+    request: Request,
+    x_paystack_signature: Optional[str] = Header(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Paystack webhook handler.
+
+    Processes payment notifications from Paystack.
+    No authentication required (verified via signature).
+    """
+    # Get raw body for signature verification
+    body = await request.body()
+
+    # Verify webhook signature
+    if not x_paystack_signature or not PaystackService.verify_webhook_signature(x_paystack_signature, body):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid webhook signature"
+        )
+
+    # Parse webhook payload
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid JSON payload"
+        )
+
+    event = payload.get('event')
+    data = payload.get('data') or {}
+    return await run_in_threadpool(_handle_webhook_event, db, event, data)
 
 
 @router.get("/{payment_id}", response_model=PaymentResponse)

@@ -18,7 +18,7 @@
     "body": {
       "success": true,
       "message": "Withdrawal of \u20a69,000.00 initiated successfully",
-      "payout_reference": "wdr_719f912790044ddcbcd0e2baf0c531c4",
+      "payout_reference": "wdr_9a23832a315c4610a6f79fe9324e443d",
       "amount": "9000.00",
       "account_number": "0000000000",
       "bank_code": "057",

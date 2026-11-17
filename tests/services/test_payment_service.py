@@ -153,3 +153,65 @@ def test_naira_to_kobo_is_exact():
     assert svc.naira_to_kobo(Decimal("10000.00")) == 1_000_000
     assert svc.naira_to_kobo(Decimal("0.07")) == 7
     assert svc.naira_to_kobo(Decimal("1234.56")) == 123_456
+
+
+def test_cancelled_booking_payment_is_flagged_needs_refund(db):
+    for booking_status in (BookingStatus.CANCELLED, BookingStatus.REJECTED):
+        _, _, payment = _setup(db, booking_status=booking_status)
+        svc.apply_charge_success(db, payment.payment_reference, _charge(payment))
+        db.refresh(payment)
+        assert payment.status == PaymentStatus.SUCCESS
+        assert payment.needs_refund is True
+
+
+def test_normal_payment_is_not_flagged(db):
+    _, _, payment = _setup(db)
+    svc.apply_charge_success(db, payment.payment_reference, _charge(payment))
+    db.refresh(payment)
+    assert payment.needs_refund is False
+
+
+def _reinitialise(db, payment, new_reference):
+    """What POST /payments/initialize does when a FAILED payment is paid for again."""
+    svc.archive_payment_reference(db, payment)
+    payment.payment_reference = new_reference
+    payment.paystack_reference = new_reference
+    payment.status = PaymentStatus.PENDING
+    db.commit()
+
+
+def test_late_success_on_an_old_reference_still_settles(db):
+    _, booking, payment = _setup(db)
+    old_ref = payment.payment_reference
+    svc.apply_charge_failed(db, old_ref, {})
+    _reinitialise(db, payment, "PAY-NEW-REF")
+
+    result = svc.apply_charge_success(db, old_ref, _charge(payment, reference=old_ref))
+
+    assert result.outcome == svc.OUTCOME_PROCESSED
+    db.refresh(payment), db.refresh(booking)
+    assert payment.status == PaymentStatus.SUCCESS
+    assert booking.status == BookingStatus.PAID
+    assert payment.needs_refund is False
+
+
+def test_second_charge_on_a_different_reference_is_flagged_as_duplicate(db):
+    _, _, payment = _setup(db)
+    old_ref = payment.payment_reference
+    svc.apply_charge_failed(db, old_ref, {})
+    _reinitialise(db, payment, "PAY-NEW-REF")
+    svc.apply_charge_success(db, old_ref, _charge(payment, reference=old_ref))
+    # the customer also completed the second checkout
+    result = svc.apply_charge_success(db, "PAY-NEW-REF", _charge(payment, reference="PAY-NEW-REF"))
+    assert result.outcome == svc.OUTCOME_ALREADY
+    db.refresh(payment)
+    assert payment.needs_refund is True
+
+
+def test_redelivery_of_the_same_reference_is_not_a_duplicate(db):
+    _, _, payment = _setup(db)
+    ref = payment.payment_reference
+    svc.apply_charge_success(db, ref, _charge(payment))
+    svc.apply_charge_success(db, ref, _charge(payment))
+    db.refresh(payment)
+    assert payment.needs_refund is False

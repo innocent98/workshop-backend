@@ -247,17 +247,31 @@ def test_ambiguous_transfer_failure_stays_processing(db, world, paystack):
     paystack.transfer_error = PaystackError("timeout")  # no status code: outcome unknown
     result = _request(db, artisan, "9000")
     assert result.withdrawal.status == WithdrawalStatus.PROCESSING
+    assert result.withdrawal.transfer_code is None  # never confirmed by Paystack
     assert svc.available_balance(db, artisan.id) == Decimal("0")  # still locked up
 
 
-def test_otp_required_transfer_is_reverted(db, world, paystack):
+def test_otp_transfer_stays_processing_and_keeps_payments_locked(db, world, paystack):
+    """The transfer exists at Paystack: freeing the payments would allow a double payout."""
     artisan, _, _ = world
     _fund(db, world, "10000.00")
     paystack.transfer_status = "otp"
-    with pytest.raises(svc.WithdrawalError):
-        _request(db, artisan, "9000")
-    assert db.query(Withdrawal).one().status == WithdrawalStatus.FAILED
-    assert svc.available_balance(db, artisan.id) == Decimal("9000.00")
+    result = _request(db, artisan, "9000")
+    assert result.withdrawal.status == WithdrawalStatus.PROCESSING
+    assert result.withdrawal.transfer_code == "TRF_1"
+    assert "OTP" in result.withdrawal.failure_reason
+    assert svc.available_balance(db, artisan.id) == Decimal("0")
+
+
+def test_replay_with_different_amount_is_conflict(db, world, paystack):
+    artisan, _, _ = world
+    _fund(db, world, "10000.00", "10000.00")
+    first = _request(db, artisan, "9000", key="amt")
+    assert first.withdrawal.requested_amount == Decimal("9000")
+    with pytest.raises(svc.WithdrawalError) as exc:
+        _request(db, artisan, "18000", key="amt")
+    assert exc.value.status_code == 409
+    assert len(paystack.transfer_calls) == 1
 
 
 # ----------------------------------------------------------------- settlement
@@ -289,11 +303,49 @@ def test_transfer_success_releases_payments_and_is_idempotent(db, world, paystac
     assert len(notifications) == 1  # only the first delivery notifies
 
 
-def test_transfer_success_amount_mismatch_is_not_settled(db, world, paystack):
-    _, payments, w = _processing(db, world, paystack, "10000.00")
-    assert svc.settle_transfer_success(db, {"reference": w.reference, "amount": 1}) == "mismatch"
+@pytest.mark.parametrize(
+    "extra",
+    [{"amount": 1}, {}, {"amount": 900_000, "currency": "USD"}],
+    ids=["amount-mismatch", "amount-missing", "currency-mismatch"],
+)
+def test_transfer_success_with_bad_amount_or_currency_needs_review(
+    db, world, paystack, notifications, extra
+):
+    artisan, payments, w = _processing(db, world, paystack, "10000.00")
+    notifications.clear()
+    assert svc.settle_transfer_success(db, {"reference": w.reference, **extra}) == "needs_review"
+    db.refresh(w), db.refresh(payments[0])
+    assert w.status == WithdrawalStatus.NEEDS_REVIEW
+    assert payments[0].status == PaymentStatus.SUCCESS and payments[0].withdrawal_id == w.id
+    assert svc.available_balance(db, artisan.id) == Decimal("0")  # still locked
+    assert len(notifications) == 1
+
+
+def test_pending_withdrawal_counts_needs_review_money_that_is_still_linked(db, world, paystack):
+    artisan, _, w = _processing(db, world, paystack, "10000.00")
+    svc.settle_transfer_success(db, {"reference": w.reference})  # missing amount
+    assert svc.pending_withdrawal_amount(db, artisan.id) == Decimal("9000.00")
+
+
+@pytest.mark.parametrize("first", [WithdrawalStatus.FAILED, WithdrawalStatus.REVERSED])
+def test_transfer_success_after_failed_or_reversed_is_flagged_not_ignored(
+    db, world, paystack, notifications, first, caplog
+):
+    artisan, payments, w = _processing(db, world, paystack, "10000.00")
+    svc.settle_transfer_failure(db, {"reference": w.reference}, first)
+    notifications.clear()
+
+    result = svc.settle_transfer_success(db, {"reference": w.reference, "amount": 900_000})
+
+    assert result == "needs_review"
     db.refresh(w)
-    assert w.status == WithdrawalStatus.PROCESSING
+    assert w.status == WithdrawalStatus.NEEDS_REVIEW
+    assert first.value in w.failure_reason
+    assert len(notifications) == 1
+    # a second delivery is a no-op
+    assert svc.settle_transfer_success(db, {"reference": w.reference, "amount": 900_000}) == (
+        "already_processed"
+    )
 
 
 def test_transfer_success_unknown_reference(db):
@@ -349,7 +401,8 @@ def test_failed_event_after_success_is_ignored(db, world, paystack):
 
 def test_settlement_finds_withdrawal_by_transfer_code(db, world, paystack):
     _, _, w = _processing(db, world, paystack, "10000.00")
-    assert svc.settle_transfer_success(db, {"transfer_code": w.transfer_code}) == "processed"
+    data = {"transfer_code": w.transfer_code, "amount": 900_000}
+    assert svc.settle_transfer_success(db, data) == "processed"
 
 
 # ----------------------------------------------------------------- real concurrency
@@ -409,3 +462,82 @@ def test_concurrent_requests_without_a_key_cannot_double_spend(db, world, paysta
     assert sorted(r[0] for r in results) == ["err", "ok"]
     assert len(paystack.transfer_calls) == 1
     assert db.query(Withdrawal).count() == 1
+
+
+# ----------------------------------------------------------------- reconciliation
+
+
+def _age(db, withdrawal, minutes):
+    withdrawal.created_at = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+    db.commit()
+
+
+def test_reconcile_settles_success(db, world, paystack):
+    artisan, payments, w = _processing(db, world, paystack, "10000.00")
+    _age(db, w, 30)
+    paystack.transfer_verify[w.reference] = {
+        "status": "success",
+        "amount": 900_000,
+        "transfer_code": "TRF_1",
+    }
+    assert svc.reconcile_processing_withdrawals(db)["success"] == 1
+    db.refresh(w), db.refresh(payments[0])
+    assert w.status == WithdrawalStatus.SUCCESS
+    assert payments[0].status == PaymentStatus.RELEASED
+
+
+@pytest.mark.parametrize(
+    "paystack_status,expected",
+    [
+        ("failed", WithdrawalStatus.FAILED),
+        ("rejected", WithdrawalStatus.FAILED),
+        ("reversed", WithdrawalStatus.REVERSED),
+    ],
+)
+def test_reconcile_failed_frees_the_money(db, world, paystack, paystack_status, expected):
+    artisan, payments, w = _processing(db, world, paystack, "10000.00")
+    _age(db, w, 30)
+    paystack.transfer_verify[w.reference] = {"status": paystack_status, "amount": 900_000}
+    svc.reconcile_processing_withdrawals(db)
+    db.refresh(w)
+    assert w.status == expected
+    assert svc.available_balance(db, artisan.id) == Decimal("9000.00")
+
+
+def test_reconcile_transfer_that_does_not_exist_is_failed_and_unlinked(db, world, paystack):
+    """Timeout where the transfer never reached Paystack (verify answers 404)."""
+    artisan, payments, w = _processing(db, world, paystack, "10000.00")
+    _age(db, w, 30)
+    summary = svc.reconcile_processing_withdrawals(db)  # no entry -> FakePaystack raises 404
+    assert summary["not_found"] == 1
+    db.refresh(w)
+    assert w.status == WithdrawalStatus.FAILED
+    assert svc.available_balance(db, artisan.id) == Decimal("9000.00")
+
+
+def test_reconcile_leaves_pending_otp_young_and_errors_alone(db, world, paystack):
+    artisan, payments, w = _processing(db, world, paystack, "10000.00", "10000.00")
+    other = db.query(Withdrawal).count()
+    assert other == 1
+    _age(db, w, 5)  # younger than the threshold: not even looked at
+    assert svc.reconcile_processing_withdrawals(db)["checked"] == 0
+    assert paystack.transfer_verify_calls == []
+
+    _age(db, w, 30)
+    for result in (
+        {"status": "pending"},
+        {"status": "otp"},
+        PaystackError("boom", 500),
+        PaystackError("net down"),
+    ):
+        paystack.transfer_verify[w.reference] = result
+        svc.reconcile_processing_withdrawals(db)
+        db.refresh(w)
+        assert w.status == WithdrawalStatus.PROCESSING
+
+
+def test_reconcile_ignores_non_processing_withdrawals(db, world, paystack):
+    _, _, w = _processing(db, world, paystack, "10000.00")
+    svc.settle_transfer_success(db, {"reference": w.reference, "amount": 900_000})
+    _age(db, w, 60)
+    assert svc.reconcile_processing_withdrawals(db)["checked"] == 0
