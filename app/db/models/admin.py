@@ -41,6 +41,8 @@ class DisputeResolution(Base):
     # Refund path only: requested (intent committed, Paystack outcome unknown) | pending |
     # processing | processed | needs-attention | failed. NULL for release_to_artisan.
     refund_status = Column(String(16), nullable=True)
+    # When the latest refund attempt was claimed (lease): a retry is refused while it is fresh.
+    refund_attempt_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     booking = relationship("Booking")

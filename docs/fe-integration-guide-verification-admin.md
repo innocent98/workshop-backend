@@ -127,7 +127,7 @@ Resolve-dispute errors (`detail.code`): 404 `booking_not_found`; 409 `not_disput
 (the *other* resolution was already applied), `refund_in_progress` (a refund exists or is being reconciled; release
 is refused), `payment_not_refundable` (funds already released / no payment); 502 `refund_unconfirmed` (outcome
 unknown, retry), 502 `refund_failed` (Paystack rejected or reported the refund failed; nothing was refunded; you may
-retry the refund, or release). UI instruction: on `refund_unconfirmed` show "refund pending confirmation, retry",
+retry the refund, or release). 409 `refund_attempt_in_progress` (a refund attempt was started less than 90 s ago and may still be running: wait, then retry), 409 `refund_conflict` (the refund went through at Paystack but the dispute had already been released to the artisan: nothing was changed, needs manual reconciliation by finance). UI instruction: on `refund_unconfirmed` show "refund pending confirmation, retry",
 never "failed".
 
 (Captured bodies: section 6.)
@@ -1190,6 +1190,7 @@ Response:
 | Admin lists: 403 for non-admin, filters, `page_size` cap (422 above 100) | **verified live** |
 | Disputes list, release_to_artisan, idempotent repeat, conflicting resolution (409), not_disputed (409), validation (422) | **verified live** |
 | refund_customer, refund unconfirmed (502) + release blocked (409 `refund_in_progress`) + retry | DB/state/notification and the reconcile logic **verified live**; the Paystack `POST /refund` and `GET /refund` calls are **stubbed** in `capture_server.py` (NOT VERIFIED LIVE against Paystack) |
+| `refund_attempt_in_progress` 409 and `refund_conflict` 409 (late refund success after a release; never overwrites the release) | tests only |
 | `refund_failed` 502, definite rejection rollback, reconciliation of "already reversed", refund.* event handling (`handle_refund_event`, no route wired yet; payload keys NOT VERIFIED against a live Paystack webhook) | tests only |
 | Admin verify / reject artisan; an admin decision wins over a late Dojah result | verify/reject **verified live**; the precedence rule is tests only |
 | First admin via `scripts/create_admin.py`, then normal `/auth/login` and an admin call | **verified live** (earlier run; the script has since gained the refuse-to-promote-existing-account rule, covered by tests) |

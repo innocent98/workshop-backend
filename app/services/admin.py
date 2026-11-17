@@ -5,7 +5,7 @@ Every state-changing action writes an ``admin_audit_logs`` row in the SAME trans
 as the change, so there is never an unaudited admin mutation.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID
 
@@ -73,6 +73,9 @@ def _resolution_response(
 # Paystack refund states. "requested" is OUR state: the intent is committed but Paystack's outcome
 # is unknown. Accepted = Paystack has the refund (money is, or is on its way, back to the customer).
 ACCEPTED_REFUND_STATUSES = ("pending", "processing", "processed", "needs-attention")
+# A refund attempt (a Paystack call + a lookup, 30 s timeouts) counts as "in flight" this long;
+# a retry is refused until the lease expires, so two attempts are never racing in normal operation.
+REFUND_ATTEMPT_LEASE = timedelta(seconds=90)
 _REFUND_RANK = {"requested": 0, "pending": 1, "processing": 2, "needs-attention": 3, "processed": 4}
 
 
@@ -170,6 +173,7 @@ def resolve_dispute(
 
     _check_refundable(booking)
     record.refund_status = "requested"
+    record.refund_attempt_at = _now()
     db.add(record)
     audit(db, admin, "dispute.refund_requested", "booking", booking.id)
     _commit_resolution(db, booking, record, resolution, release=False)
@@ -258,8 +262,22 @@ def _resolve_existing(
         return _commit_resolution(db, booking, existing, existing.resolution, release=True)
 
     if existing.refund_status in ("requested", "failed"):
-        # Retry: back to "requested" (intent), then reconcile-first inside _run_refund.
+        now = _now()
+        if (
+            existing.refund_status == "requested"
+            and existing.refund_attempt_at is not None
+            and now - existing.refund_attempt_at < REFUND_ATTEMPT_LEASE
+        ):
+            db.rollback()
+            raise _err(
+                "refund_attempt_in_progress",
+                "A refund attempt for this booking was started moments ago and may still be "
+                "running. Wait a minute, then retry to reconcile.",
+                status.HTTP_409_CONFLICT,
+            )
+        # Retry: claim a new attempt under the booking lock (reconcile-first inside _run_refund).
         existing.refund_status = "requested"
+        existing.refund_attempt_at = now
         existing.note = note
         audit(db, admin, "dispute.refund_retry", "booking", booking.id)
         db.commit()
@@ -302,7 +320,7 @@ def _run_refund(db: Session, admin: User, booking_id: int) -> ResolveDisputeResp
             )
         if data is None:
             if definite:
-                _drop_refund_intent(db, booking_id)
+                _mark_refund_failed(db, booking_id)
                 raise _err(
                     "refund_failed",
                     "Paystack rejected the refund. Nothing was refunded; you can try again.",
@@ -317,24 +335,86 @@ def _run_refund(db: Session, admin: User, booking_id: int) -> ResolveDisputeResp
     return _complete_refund(db, admin, booking_id, data)
 
 
-def _drop_refund_intent(db: Session, booking_id: int) -> None:
+def _mark_refund_failed(db: Session, booking_id: int) -> None:
+    """A definite Paystack rejection with no refund found: mark the attempt failed (never delete the
+    row, a concurrent attempt may still complete). Under the booking lock; only from 'requested'."""
+    db.query(Booking).filter(Booking.id == booking_id).with_for_update().first()
     record = db.query(DisputeResolution).filter(DisputeResolution.booking_id == booking_id).first()
-    if record is not None and record.refund_status in ("requested", "failed"):
-        db.delete(record)
-        db.commit()
+    if (
+        record is not None
+        and record.resolution == DisputeResolutionType.REFUND_CUSTOMER.value
+        and record.refund_status == "requested"
+    ):
+        record.refund_status = "failed"
+    db.commit()
+
+
+def _record_refund_conflict(db: Session, record, booking_id: int, data: dict) -> None:
+    """Paystack refunded the customer but the dispute was already released to the artisan: money
+    went both ways. Never overwrite the release; surface it (critical log + audit row per refund).
+    """
+    ref = str(data.get("id")) if data.get("id") is not None else None
+    logger.critical(
+        f"REFUND CONFLICT booking={booking_id}: Paystack refund {ref} exists but the dispute was "
+        f"released to the artisan. Manual reconciliation required."
+    )
+    if record is None:
+        db.rollback()
+        return
+    seen = (
+        db.query(AdminAuditLog)
+        .filter(
+            AdminAuditLog.action == "refund.conflict", AdminAuditLog.target_id == str(booking_id)
+        )
+        .all()
+    )
+    if not any((a.details or {}).get("refund_reference") == ref for a in seen):
+        db.add(
+            AdminAuditLog(
+                admin_id=record.admin_id,
+                action="refund.conflict",
+                target_type="booking",
+                target_id=str(booking_id),
+                details={"refund_reference": ref},
+            )
+        )
+    db.commit()
+
+
+def _apply_accepted_refund(booking: Booking, payment: Payment, record, status_value: str, now):
+    """Paystack has the refund: money is (being) returned to the customer."""
+    if _REFUND_RANK.get(record.refund_status or "", -1) <= _REFUND_RANK[status_value]:
+        record.refund_status = status_value
+    payment.status = PaymentStatus.REFUNDED
+    payment.refunded_at = payment.refunded_at or now
+    booking.status = BookingStatus.CANCELLED
+    booking.cancelled_at = booking.cancelled_at or now
+    booking.cancellation_reason = f"Refunded after dispute: {record.note}"
 
 
 def _complete_refund(
     db: Session, admin: User, booking_id: int, data: dict
 ) -> ResolveDisputeResponse:
     booking = db.query(Booking).filter(Booking.id == booking_id).with_for_update().first()
-    record = db.query(DisputeResolution).filter(DisputeResolution.booking_id == booking_id).one()
+    db.expire_all()  # re-read under the lock: a concurrent attempt / release may have run
+    record = db.query(DisputeResolution).filter(DisputeResolution.booking_id == booking_id).first()
     payment = booking.payment
     refund_status = _normalise_refund_status(data.get("status"))
-    record.refund_reference = str(data["id"]) if data.get("id") is not None else None
 
+    if record is None or record.resolution != DisputeResolutionType.REFUND_CUSTOMER.value:
+        # Late success after the dispute was released: do NOT overwrite the release.
+        _record_refund_conflict(db, record, booking_id, data)
+        raise _err(
+            "refund_conflict",
+            "The refund went through at Paystack, but this dispute was already released to the "
+            "artisan. Nothing was changed; reconcile manually (see the audit log).",
+            status.HTTP_409_CONFLICT,
+        )
+
+    record.refund_reference = str(data["id"]) if data.get("id") is not None else None
     if refund_status == "failed":
-        record.refund_status = "failed"
+        if record.refund_status == "requested":
+            record.refund_status = "failed"
         db.commit()
         raise _err(
             "refund_failed",
@@ -342,14 +422,8 @@ def _complete_refund(
             status.HTTP_502_BAD_GATEWAY,
         )
 
-    now = _now()
-    if _REFUND_RANK.get(record.refund_status or "", -1) <= _REFUND_RANK[refund_status]:
-        record.refund_status = refund_status
-    payment.status = PaymentStatus.REFUNDED
-    payment.refunded_at = payment.refunded_at or now
-    booking.status = BookingStatus.CANCELLED
-    booking.cancelled_at = booking.cancelled_at or now
-    booking.cancellation_reason = f"Refunded after dispute: {record.note}"
+    # Paystack's word wins: also adopts a refund that a concurrent attempt had marked 'failed'.
+    _apply_accepted_refund(booking, payment, record, refund_status, _now())
     audit(
         db,
         admin,
@@ -404,13 +478,19 @@ def handle_refund_event(db: Session, event: str, data: dict) -> Optional[str]:
         return None
     record = (
         db.query(DisputeResolution)
-        .filter(
-            DisputeResolution.booking_id == payment.booking_id,
-            DisputeResolution.resolution == DisputeResolutionType.REFUND_CUSTOMER.value,
-        )
+        .filter(DisputeResolution.booking_id == payment.booking_id)
         .first()
     )
     if record is None:
+        return None
+
+    accepted_event = new in ACCEPTED_REFUND_STATUSES
+    if record.resolution != DisputeResolutionType.REFUND_CUSTOMER.value:
+        # The dispute was released to the artisan; a live refund event means money went both ways.
+        if accepted_event:
+            _record_refund_conflict(db, record, payment.booking_id, data)
+        else:
+            db.rollback()
         return None
 
     if record.refund_status == "processed":
@@ -422,8 +502,9 @@ def handle_refund_event(db: Session, event: str, data: dict) -> Optional[str]:
 
     booking = db.query(Booking).filter(Booking.id == payment.booking_id).with_for_update().first()
     db.refresh(record)
+    db.refresh(payment)
     current = record.refund_status
-    if current == "processed" or (current == "failed" and new != "failed"):
+    if record.resolution != DisputeResolutionType.REFUND_CUSTOMER.value or current == "processed":
         db.rollback()
         return current
     if new == "failed" and (
@@ -435,6 +516,7 @@ def handle_refund_event(db: Session, event: str, data: dict) -> Optional[str]:
         # or the record moved on since Paystack was consulted, so this event is stale.
         db.rollback()
         return current
+
     if new == "failed":
         record.refund_status = "failed"
         payment.status = PaymentStatus.SUCCESS
@@ -452,6 +534,22 @@ def handle_refund_event(db: Session, event: str, data: dict) -> Optional[str]:
             )
         )
         logger.warning(f"Refund failed event booking={booking.id}: dispute reopened")
+    elif current in ("requested", "failed"):
+        # Paystack has the refund even though our own call never confirmed it (or a concurrent
+        # attempt had marked the row failed): adopt it, so the booking is not left stuck.
+        if data.get("id") is not None:
+            record.refund_reference = str(data["id"])
+        _apply_accepted_refund(booking, payment, record, new, _now())
+        audit_target = booking.id
+        db.add(
+            AdminAuditLog(
+                admin_id=record.admin_id,
+                action="refund.adopted_from_event",
+                target_type="booking",
+                target_id=str(audit_target),
+                details={"refund_reference": record.refund_reference, "refund_status": new},
+            )
+        )
     elif _REFUND_RANK.get(current or "", -1) <= _REFUND_RANK[new]:
         record.refund_status = new
     if data.get("id") is not None and not record.refund_reference:

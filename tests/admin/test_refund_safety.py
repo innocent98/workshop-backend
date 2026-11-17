@@ -136,6 +136,7 @@ def test_retry_after_unconfirmed_refund_goes_through(client, db, admin_h, disput
     ps.refunds = [TIMEOUT, {"id": 9, "status": "pending"}]
     ps.lists = [[], []]
     assert resolve(client, admin_h, disputed.id).status_code == 502
+    age_attempt(db)  # the first attempt's lease has expired
     r = resolve(client, admin_h, disputed.id)
     assert r.status_code == 200 and r.json()["already_resolved"] is False
     assert states(db, disputed.id) == (BookingStatus.CANCELLED, PaymentStatus.REFUNDED, "pending")
@@ -151,15 +152,15 @@ def test_reconcile_call_failing_keeps_intent(client, db, admin_h, disputed, ps):
     assert resolve(client, admin_h, disputed.id, "release_to_artisan").status_code == 409
 
 
-def test_definite_rejection_with_no_refund_found_rolls_the_intent_back(
+def test_definite_rejection_with_no_refund_found_marks_the_attempt_failed_never_deletes(
     client, db, admin_h, disputed, ps
 ):
     ps.refunds = [PaystackError("Transaction not found", status_code=404)]
     ps.lists = [[]]
     r = resolve(client, admin_h, disputed.id)
     assert r.status_code == 502 and r.json()["detail"]["code"] == "refund_failed"
-    assert db.query(DisputeResolution).count() == 0
-    assert states(db, disputed.id)[:2] == (BookingStatus.DISPUTED, PaymentStatus.SUCCESS)
+    assert db.query(DisputeResolution).count() == 1  # the row is kept, as failed
+    assert states(db, disputed.id) == (BookingStatus.DISPUTED, PaymentStatus.SUCCESS, "failed")
     # nothing was refunded, so the admin may now release instead
     assert resolve(client, admin_h, disputed.id, "release_to_artisan").status_code == 200
 
@@ -205,9 +206,9 @@ def test_commit_failure_after_paystack_success_cannot_lead_to_a_release(
     assert resolve(client, admin_h, disputed.id, "release_to_artisan").status_code == 409
 
     monkeypatch.setattr(admin_service, "_complete_refund", real)
-    r = resolve(
-        client, admin_h, disputed.id
-    )  # retry: Paystack says "already reversed" -> reconcile
+    age_attempt(db)  # the failed attempt's lease has expired
+    # retry: Paystack says "already reversed" -> reconcile
+    r = resolve(client, admin_h, disputed.id)
     assert r.status_code == 200
     assert states(db, disputed.id) == (BookingStatus.CANCELLED, PaymentStatus.REFUNDED, "pending")
 
@@ -478,3 +479,135 @@ def test_refund_webhook_requires_a_valid_paystack_signature(
     r = _post_event(client, "refund.failed", {"transaction_reference": ref}, secret="wrong")
     assert r.status_code == 401
     assert states(db, disputed.id)[2] == "pending"  # untouched
+
+
+# ------------------------------------------------- concurrent attempts (review: races)
+
+OLD_ATTEMPT = {"minutes": 10}
+
+
+def age_attempt(db, minutes=10):
+    from datetime import datetime, timedelta, timezone
+
+    db.expire_all()
+    rec = db.query(DisputeResolution).one()
+    rec.refund_attempt_at = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+    db.commit()
+
+
+def test_retry_is_refused_while_an_attempt_is_in_flight_then_allowed_after_the_lease(
+    client, db, admin_h, disputed, ps
+):
+    ps.refunds = [TIMEOUT, {"id": 9, "status": "pending"}]
+    ps.lists = [[], []]
+    assert resolve(client, admin_h, disputed.id).status_code == 502  # unconfirmed, 'requested'
+    r = resolve(client, admin_h, disputed.id)  # immediately: the first attempt may still be running
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "refund_attempt_in_progress"
+    assert len(ps.refund_calls) == 1
+
+    age_attempt(db)  # lease expired
+    assert resolve(client, admin_h, disputed.id).status_code == 200
+    assert len(ps.refund_calls) == 2
+
+
+def test_scenario_a_concurrent_attempt_fails_definitively_then_the_first_succeeds(
+    client, db, admin_h, disputed, ps
+):
+    """Attempt A is mid-call; attempt B (lease expired) is rejected with a 4xx and its refund
+    lookup runs before A's refund exists. A then succeeds. No 500, nothing deleted, customer
+    refunded and recorded, release blocked."""
+    ps.refunds = [PaystackError("rejected", status_code=400), {"id": 77, "status": "pending"}]
+    ps.lists = [[]]  # B's lookup: A's refund is not visible yet
+
+    def attempt_b_runs_while_a_is_in_flight():
+        ps.on_refund = None
+        age_attempt(db)
+        rb = resolve(client, admin_h, disputed.id)
+        assert rb.status_code == 502 and rb.json()["detail"]["code"] == "refund_failed"
+
+    ps.on_refund = attempt_b_runs_while_a_is_in_flight
+    ra = resolve(client, admin_h, disputed.id)
+    assert ra.status_code == 200, ra.text
+    assert ra.json()["refund_reference"] == "77"
+    assert db.query(DisputeResolution).count() == 1
+    assert states(db, disputed.id) == (BookingStatus.CANCELLED, PaymentStatus.REFUNDED, "pending")
+    assert resolve(client, admin_h, disputed.id, "release_to_artisan").status_code == 409
+
+
+def test_scenario_b_late_refund_success_after_a_release_is_a_conflict_not_an_overwrite(
+    client, db, admin_h, disputed, ps, notifications
+):
+    """Attempt A is mid-call; B fails definitively (row 'failed'); the admin releases; then A's
+    refund succeeds at Paystack. The release must not be overwritten and nothing may 500: the
+    conflict is surfaced (409 refund_conflict) and audited for manual reconciliation."""
+    from app.db.models.admin import AdminAuditLog
+
+    ps.refunds = [PaystackError("rejected", status_code=400), {"id": 88, "status": "pending"}]
+    ps.lists = [[]]
+
+    def b_fails_then_admin_releases():
+        ps.on_refund = None
+        age_attempt(db)
+        assert resolve(client, admin_h, disputed.id).status_code == 502  # B -> 'failed'
+        rel = resolve(client, admin_h, disputed.id, "release_to_artisan", note="refund failed")
+        assert rel.status_code == 200
+
+    ps.on_refund = b_fails_then_admin_releases
+    ra = resolve(client, admin_h, disputed.id)
+    assert ra.status_code == 409 and ra.json()["detail"]["code"] == "refund_conflict"
+
+    db.expire_all()
+    b = db.get(Booking, disputed.id)
+    assert b.status == BookingStatus.COMPLETED and b.completion_disputed_at is None  # release kept
+    assert db.query(Payment).one().status == PaymentStatus.SUCCESS  # not flipped to REFUNDED
+    rec = db.query(DisputeResolution).one()
+    assert rec.resolution == "release_to_artisan"
+    conflict = db.query(AdminAuditLog).filter_by(action="refund.conflict").one()
+    assert conflict.details["refund_reference"] == "88"
+
+
+def test_late_success_after_attempt_marked_failed_is_adopted(client, db, admin_h, disputed, ps):
+    """B marked the row failed, but A's refund really went through (no release yet): adopt it."""
+    ps.refunds = [PaystackError("rejected", status_code=400), {"id": 99, "status": "processing"}]
+    ps.lists = [[]]
+
+    def b_fails():
+        ps.on_refund = None
+        age_attempt(db)
+        assert resolve(client, admin_h, disputed.id).status_code == 502
+
+    ps.on_refund = b_fails
+    assert resolve(client, admin_h, disputed.id).status_code == 200
+    assert states(db, disputed.id) == (
+        BookingStatus.CANCELLED,
+        PaymentStatus.REFUNDED,
+        "processing",
+    )
+
+
+def test_processed_event_while_requested_also_completes_the_booking(
+    client, db, admin_h, disputed, ps
+):
+    ps.refunds = [TIMEOUT]
+    ps.lists = [[]]
+    assert resolve(client, admin_h, disputed.id).status_code == 502  # stuck at 'requested'
+    ref = db.query(Payment).one().paystack_reference
+    out = handle_refund_event(db, "refund.processed", {"transaction_reference": ref, "id": 5})
+    assert out == "processed"
+    assert states(db, disputed.id) == (BookingStatus.CANCELLED, PaymentStatus.REFUNDED, "processed")
+    assert resolve(client, admin_h, disputed.id, "release_to_artisan").status_code == 409
+
+
+def test_processed_event_for_a_released_booking_is_ignored_but_audited(
+    client, db, admin_h, disputed, ps
+):
+    from app.db.models.admin import AdminAuditLog
+
+    ps.refunds = [PaystackError("rejected", status_code=400)]
+    ps.lists = [[]]
+    resolve(client, admin_h, disputed.id)  # -> failed
+    assert resolve(client, admin_h, disputed.id, "release_to_artisan").status_code == 200
+    ref = db.query(Payment).one().paystack_reference
+    handle_refund_event(db, "refund.processed", {"transaction_reference": ref, "id": 6})
+    assert states(db, disputed.id)[0] == BookingStatus.COMPLETED
+    assert db.query(AdminAuditLog).filter_by(action="refund.conflict").count() == 1

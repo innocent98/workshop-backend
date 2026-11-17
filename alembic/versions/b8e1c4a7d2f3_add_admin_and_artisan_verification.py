@@ -99,6 +99,7 @@ def upgrade() -> None:
         sa.Column("dispute_reason", sa.Text(), nullable=True),
         sa.Column("refund_reference", sa.String(255), nullable=True),
         sa.Column("refund_status", sa.String(16), nullable=True),
+        sa.Column("refund_attempt_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column(
             "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
         ),

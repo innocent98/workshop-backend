@@ -39,9 +39,14 @@ reconciles first). Paystack refunds are asynchronous, so `handle_refund_event` a
 processed|failed` (never moves backwards; `processed` is final; `failed` puts payment back to `success` and the
 booking back to `disputed` so the admin can retry or release). The events are wired into the Paystack
 webhook in `payments.py` (`REFUND_WEBHOOK_EVENTS` in `_handle_webhook_event`, signature-checked like every event; an
-unknown transaction is acknowledged as `ignored`). A `refund.failed` event is never trusted on its own (it would reopen the dispute and unblock a release): it is ignored when it names a different refund than the one we hold (a late event for an earlier, already-retried refund), and otherwise applied only if Paystack's refund list shows no live refund; if that lookup fails nothing changes. Residual risk:
-two admins retrying simultaneously can both call Paystack; Paystack rejects the second ("already reversed") and
-reconciliation adopts the first.
+unknown transaction is acknowledged as `ignored`). A `refund.failed` event is never trusted on its own (it would reopen the dispute and unblock a release): it is ignored when it names a different refund than the one we hold (a late event for an earlier, already-retried refund), and otherwise applied only if Paystack's refund list shows no live refund; if that lookup fails nothing changes. Concurrency (review round 3): a retry from `requested` is refused while the
+last attempt's lease (`refund_attempt_at`, 90 s) is fresh (409 `refund_attempt_in_progress`), so attempts do not race
+normally; the intent row is **never deleted** (a definite rejection marks it `failed`); `_complete_refund` re-reads
+under the booking lock and adopts Paystack's word (also adopting a refund a stale attempt had marked `failed`, and a
+`refund.processed|pending|processing` event arriving while the row is `requested|failed` now completes the booking
+too). If a refund succeeds at Paystack **after the dispute was released** to the artisan, the release is never
+overwritten: the call/event returns 409 `refund_conflict` (or is ignored for events), logs critical and writes a
+`refund.conflict` audit row for manual reconciliation, because money then went both ways.
 
 ### Verification (Dojah hosted widget)
 
