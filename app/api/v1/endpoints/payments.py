@@ -43,6 +43,9 @@ from app.utils.payment_reference import generate_payment_reference
 
 router = APIRouter()
 
+# Paystack transaction statuses that are final failures (everything else may still succeed).
+TERMINAL_FAILURE_STATUSES = {"failed", "reversed"}
+
 
 def _payment_split(gross_amount: Decimal) -> tuple[Decimal, Decimal]:
     platform_fee = calculate_platform_fee(
@@ -312,7 +315,9 @@ def verify_payment(
             "message": "Payment verified successfully",
         }
 
-    if paystack_status == "failed":
+    if paystack_status in TERMINAL_FAILURE_STATUSES:
+        # Only a terminal Paystack status may fail a payment; apply_charge_failed never
+        # regresses a SUCCESS/RELEASED payment.
         apply_charge_failed(db, reference, verification_response)
         db.refresh(payment)
         return {
@@ -323,7 +328,8 @@ def verify_payment(
             "message": "Payment verification failed",
         }
 
-    # abandoned / ongoing / pending: the customer has not finished paying yet.
+    # pending / ongoing / abandoned / queued / processing / unknown: not paid YET. The payment
+    # stays PENDING so a later verify or the webhook can still settle it.
     return {
         "payment_reference": payment.payment_reference,
         "status": payment.status.value,
