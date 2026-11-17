@@ -254,3 +254,92 @@ def test_verify_of_an_old_reference_reporting_failed_does_not_fail_the_current_a
     assert r.status_code == 200
     db.expire_all()
     assert db.get(type(payment), payment.id).status == PaymentStatus.PENDING
+
+
+# --------------------------------------------------- verify only fails on a terminal status
+
+
+def _verify_as_customer(client, db, booking, payment, monkeypatch, paystack_data):
+    from app.api.deps import get_current_user
+    from app.db.models.user import User
+    from app.main import app
+
+    customer_id = booking.customer_id
+    monkeypatch.setattr(
+        PaystackService, "verify_transaction", staticmethod(lambda ref: paystack_data)
+    )
+    app.dependency_overrides[get_current_user] = lambda: db.get(User, customer_id)
+    try:
+        return client.get(f"/api/v1/payments/verify/{payment.payment_reference}")
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+@pytest.mark.parametrize(
+    "paystack_status", ["pending", "ongoing", "abandoned", "queued", "processing", None, "weird"]
+)
+def test_verify_with_a_non_terminal_status_keeps_the_payment_pending(
+    client, db, pending_payment, monkeypatch, paystack_status
+):
+    booking, payment = pending_payment
+    data = {"status": paystack_status} if paystack_status else {}
+    r = _verify_as_customer(client, db, booking, payment, monkeypatch, data)
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["paid"] is False
+    assert body["status"] == "pending"
+    assert body["message"] == "Payment not completed yet"
+    db.expire_all()
+    assert db.get(type(payment), payment.id).status == PaymentStatus.PENDING
+    assert db.get(type(payment), payment.id).failed_at is None
+
+
+@pytest.mark.parametrize("paystack_status", ["failed", "reversed"])
+def test_verify_with_a_terminal_failure_marks_failed(
+    client, db, pending_payment, monkeypatch, paystack_status
+):
+    booking, payment = pending_payment
+    r = _verify_as_customer(client, db, booking, payment, monkeypatch, {"status": paystack_status})
+    assert r.json()["paid"] is False
+    assert r.json()["status"] == "failed"
+    db.expire_all()
+    assert db.get(type(payment), payment.id).status == PaymentStatus.FAILED
+
+
+def test_a_premature_verify_does_not_poison_a_later_successful_verify(
+    client, db, pending_payment, monkeypatch
+):
+    """App polls verify right after the browser returns: pending first, success later."""
+    booking, payment = pending_payment
+    _verify_as_customer(client, db, booking, payment, monkeypatch, {"status": "ongoing"})
+    r = _verify_as_customer(client, db, booking, payment, monkeypatch, _charge(payment))
+    assert r.json()["paid"] is True
+    db.expire_all()
+    assert db.get(type(booking), booking.id).status == BookingStatus.PAID
+
+
+def test_verify_never_regresses_a_successful_payment(client, db, pending_payment, monkeypatch):
+    booking, payment = pending_payment
+    _post(client, "charge.success", _charge(payment))
+    r = _verify_as_customer(client, db, booking, payment, monkeypatch, {"status": "failed"})
+    assert r.json()["paid"] is True
+    db.expire_all()
+    assert db.get(type(payment), payment.id).status == PaymentStatus.SUCCESS
+    assert db.get(type(booking), booking.id).status == BookingStatus.PAID
+
+
+def test_late_webhook_after_a_failed_verify_still_settles(client, db, pending_payment, monkeypatch):
+    """verify said failed (terminal), but the customer actually paid: charge.success wins."""
+    booking, payment = pending_payment
+    _verify_as_customer(client, db, booking, payment, monkeypatch, {"status": "failed"})
+    db.expire_all()
+    assert db.get(type(payment), payment.id).status == PaymentStatus.FAILED
+
+    r = _post(client, "charge.success", _charge(payment))
+
+    assert r.json() == {"status": "success", "message": "Payment processed"}
+    db.expire_all()
+    paid = db.get(type(payment), payment.id)
+    assert paid.status == PaymentStatus.SUCCESS and paid.failed_at is None
+    assert db.get(type(booking), booking.id).status == BookingStatus.PAID
