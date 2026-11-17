@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.logger import logger
-from app.db.models.admin import AdminAuditLog
+from app.db.models.admin import AdminAuditLog, DisputeResolution, DisputeResolutionType
 from app.db.models.artisan_profile import ArtisanProfile, AvailabilityStatus
 from app.db.models.booking import Booking, BookingStatus
 from app.db.models.otp import OTP
@@ -43,6 +43,9 @@ ACTIVE_BOOKING_STATES = (
     BookingStatus.IN_PROGRESS,
     BookingStatus.DISPUTED,
 )
+# A dispute refund Paystack has accepted is not final until it is processed: a later refund.failed
+# puts the payment back to success and the booking back to disputed (see services/admin.py).
+IN_FLIGHT_REFUND_STATES = ("requested", "pending", "processing", "needs-attention")
 UNFINISHED_WITHDRAWAL_STATES = (WithdrawalStatus.PROCESSING, WithdrawalStatus.NEEDS_REVIEW)
 
 # Keys removed from the raw Paystack JSON kept on payment rows (customer identity, card/bank,
@@ -86,7 +89,7 @@ def scrub_raw_json(raw: Any):
 BLOCKER_MESSAGES = {
     "active_bookings": "Finish or cancel your accepted, paid, in-progress and disputed bookings.",
     "unfinished_withdrawal": "A withdrawal is still being processed. Wait for it to finish first.",
-    "refund_pending": "A refund owed to you is still being processed. Please wait for it.",
+    "refund_pending": "A refund on one of your bookings is still being processed. Please wait.",
     "wallet_balance": "Withdraw your earnings first (money awaiting confirmation counts too).",
 }
 
@@ -169,8 +172,20 @@ def find_blockers(db: Session, user: User) -> List[dict]:
         .filter(Booking.customer_id == user.id, Payment.needs_refund.is_(True))
         .scalar()
     )
-    if owed_refunds:
-        blockers.append({"code": "refund_pending", "count": owed_refunds})
+    # Dispute refunds still in flight, on either side of the booking.
+    in_flight_refunds = (
+        db.query(func.count(DisputeResolution.id))
+        .join(Booking, Booking.id == DisputeResolution.booking_id)
+        .filter(
+            (Booking.customer_id == user.id) | (Booking.artisan_id == user.id),
+            DisputeResolution.resolution == DisputeResolutionType.REFUND_CUSTOMER.value,
+            DisputeResolution.refund_status.in_(IN_FLIGHT_REFUND_STATES),
+        )
+        .scalar()
+    )
+    pending_refunds = (owed_refunds or 0) + (in_flight_refunds or 0)
+    if pending_refunds:
+        blockers.append({"code": "refund_pending", "count": pending_refunds})
 
     # Completed jobs whose money has not been withdrawn: withdrawable now, or still inside the
     # client's confirmation window. Either way it is the artisan's money and must be paid out first.

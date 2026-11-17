@@ -61,7 +61,7 @@ user. The same email/phone can be registered again.
 |---|---|---|
 | `active_bookings` (`count`) | bookings (as customer **or** artisan) in accepted, paid, in-progress or disputed state | finish/cancel them, or wait for the dispute to be resolved |
 | `unfinished_withdrawal` (`count`) | a withdrawal is processing or needs review | wait for it to finish |
-| `refund_pending` (`count`) | a payment of yours is flagged as owed back to you (e.g. a duplicate or late payment) and the refund has not been done yet | wait for support to finish the refund |
+| `refund_pending` (`count`) | money is on its way back to a customer and not final yet: a payment flagged as owed back (e.g. a duplicate or late payment), or a dispute refund that Paystack accepted but has not processed. Applies to **both** the customer and the artisan of that booking (a failed refund would re-open the dispute) | wait for the refund to finish (usually minutes to a few days) |
 | `wallet_balance` (`amount`, string, Naira) | completed jobs whose money has not been withdrawn (withdrawable now **or** still inside the client's confirmation window) | withdraw the earnings first (wallet screen) |
 
 ## 3b. Other endpoints: `409 account_unavailable`
@@ -72,6 +72,13 @@ deactivated**: `PATCH /bookings/{id}/negotiate`, `/negotiate/respond`, `/accept`
 `409 {"detail": {"code": "account_unavailable", "message": "..."}}`. `reject` and `cancel` still work so nobody is
 trapped. In the UI: show "This user's account is no longer available" and offer to cancel the booking. A booking
 request created for an artisan whose deletion is in flight returns the usual 404 `Artisan not found or inactive`.
+
+## 3c. `POST /auth/change-password` now has an attempt limit
+
+Wrong *current* passwords are counted per user: after 5 in 15 minutes the endpoint answers
+`429 {"detail": {"code": "too_many_attempts", "message": "..."}}`, even for the correct password, until the
+window passes (the wrong-password answer itself is unchanged: `400 {"detail": "Current password is incorrect"}`).
+Show "too many attempts, try again in a few minutes". It does not share a counter with account deletion.
 
 ## 4. UX instructions
 
@@ -104,7 +111,7 @@ Response:
   "message": "Login successful",
   "token": "<jwt redacted>",
   "user": {
-    "id": "d95eaaa4-92ae-4310-bdfc-1c6ab4f3f944",
+    "id": "0a58296a-286e-4cf0-9ae6-b8e2b325bfd4",
     "full_name": "Demo Artisan",
     "email": "artisan@example.com",
     "phone_number": "+2348000000002",
@@ -133,7 +140,7 @@ Response:
   "message": "Login successful",
   "token": "<jwt redacted>",
   "user": {
-    "id": "7e9e63ff-7b39-4faf-b6de-0086fbbeab13",
+    "id": "546bcb78-76ba-457b-a919-bf74a7f89db6",
     "full_name": "Blocked Customer",
     "email": "blocked@example.com",
     "phone_number": "+2348000000003",
@@ -162,7 +169,7 @@ Response:
   "message": "Login successful",
   "token": "<jwt redacted>",
   "user": {
-    "id": "e1d4d263-ff52-4915-90de-2ce92267ffca",
+    "id": "4981d9d1-bd77-42cf-a074-684087d03b26",
     "full_name": "Leaving Customer",
     "email": "leaving@example.com",
     "phone_number": "+2348000000004",
@@ -191,7 +198,7 @@ Response:
   "message": "Login successful",
   "token": "<jwt redacted>",
   "user": {
-    "id": "be310c3f-adf9-48df-9674-c905f41dec83",
+    "id": "f6315a72-fc08-41ac-895b-eeecdfc2bccb",
     "full_name": "Demo Admin",
     "email": "admin@example.com",
     "phone_number": "+2348000000005",
@@ -202,7 +209,36 @@ Response:
 }
 ```
 
-### `05-delete-no-auth.json`
+### `05-login-refunder.json`
+`POST /auth/login` -> **200**
+
+Request:
+```json
+{
+  "email": "refunder@example.com",
+  "password": "<placeholder>"
+}
+```
+
+Response:
+```json
+{
+  "success": true,
+  "message": "Login successful",
+  "token": "<jwt redacted>",
+  "user": {
+    "id": "6e80b006-ad2d-45df-a2ce-d698497fcfac",
+    "full_name": "Refund Customer",
+    "email": "refunder@example.com",
+    "phone_number": "+2348000000007",
+    "user_type": "client",
+    "profile_picture_url": null,
+    "bio": null
+  }
+}
+```
+
+### `06-delete-no-auth.json`
 `DELETE /auth/me` -> **403**
 
 Request:
@@ -219,7 +255,7 @@ Response:
 }
 ```
 
-### `06-delete-password-required.json`
+### `07-delete-password-required.json`
 `DELETE /auth/me` -> **400**
 
 Request:
@@ -237,7 +273,7 @@ Response:
 }
 ```
 
-### `07-delete-wrong-password.json`
+### `08-delete-wrong-password.json`
 `DELETE /auth/me` -> **403**
 
 Request:
@@ -257,7 +293,7 @@ Response:
 }
 ```
 
-### `08-delete-blocked-active-booking.json`
+### `09-delete-blocked-active-booking.json`
 `DELETE /auth/me` -> **409**  
 _customer with an ACCEPTED booking_
 
@@ -285,7 +321,7 @@ Response:
 }
 ```
 
-### `09-delete-blocked-artisan.json`
+### `10-delete-blocked-artisan.json`
 `DELETE /auth/me` -> **409**  
 _artisan: active booking + completed job with earnings not yet withdrawn_
 
@@ -301,12 +337,17 @@ Response:
 {
   "detail": {
     "code": "active_bookings",
-    "message": "Your account cannot be deleted yet: Finish or cancel your accepted, paid, in-progress and disputed bookings. Withdraw your earnings first (money awaiting confirmation counts too).",
+    "message": "Your account cannot be deleted yet: Finish or cancel your accepted, paid, in-progress and disputed bookings. A refund on one of your bookings is still being processed. Please wait. Withdraw your earnings first (money awaiting confirmation counts too).",
     "blockers": [
       {
         "code": "active_bookings",
         "count": 1,
         "message": "Finish or cancel your accepted, paid, in-progress and disputed bookings."
+      },
+      {
+        "code": "refund_pending",
+        "count": 1,
+        "message": "A refund on one of your bookings is still being processed. Please wait."
       },
       {
         "code": "wallet_balance",
@@ -318,7 +359,7 @@ Response:
 }
 ```
 
-### `10-delete-admin-refused.json`
+### `11-delete-admin-refused.json`
 `DELETE /auth/me` -> **409**
 
 Request:
@@ -338,7 +379,78 @@ Response:
 }
 ```
 
-### `11-delete-google-reauth-required.json`
+### `12-delete-blocked-refund-pending.json`
+`DELETE /auth/me` -> **409**  
+_a dispute refund accepted by Paystack but not yet processed (refund_status pending)_
+
+Request:
+```json
+{
+  "password": "Placeholder-pw-1"
+}
+```
+
+Response:
+```json
+{
+  "detail": {
+    "code": "refund_pending",
+    "message": "Your account cannot be deleted yet: A refund on one of your bookings is still being processed. Please wait.",
+    "blockers": [
+      {
+        "code": "refund_pending",
+        "count": 1,
+        "message": "A refund on one of your bookings is still being processed. Please wait."
+      }
+    ]
+  }
+}
+```
+
+### `13-change-password-wrong.json`
+`POST /auth/change-password` -> **400**  
+_5th wrong attempt (400, plain-string detail)_
+
+Request:
+```json
+{
+  "current_password": "wrong-password-1",
+  "new_password": "<new>",
+  "confirm_password": "<new>"
+}
+```
+
+Response:
+```json
+{
+  "detail": "Current password is incorrect"
+}
+```
+
+### `14-change-password-locked.json`
+`POST /auth/change-password` -> **429**  
+_locked for this user for 15 minutes_
+
+Request:
+```json
+{
+  "current_password": "<correct>",
+  "new_password": "<new>",
+  "confirm_password": "<new>"
+}
+```
+
+Response:
+```json
+{
+  "detail": {
+    "code": "too_many_attempts",
+    "message": "Too many incorrect attempts. Please try again in a few minutes."
+  }
+}
+```
+
+### `15-delete-google-reauth-required.json`
 `DELETE /auth/me` -> **400**  
 _Google-only account, no token sent_
 
@@ -357,7 +469,7 @@ Response:
 }
 ```
 
-### `12-delete-google-stale-token.json`
+### `16-delete-google-stale-token.json`
 `DELETE /auth/me` -> **403**  
 _Firebase verification STUBBED (NOT VERIFIED LIVE against Firebase)_
 
@@ -378,7 +490,7 @@ Response:
 }
 ```
 
-### `13-delete-google-wrong-account.json`
+### `17-delete-google-wrong-account.json`
 `DELETE /auth/me` -> **403**
 
 Request:
@@ -398,7 +510,7 @@ Response:
 }
 ```
 
-### `14-delete-google-success.json`
+### `18-delete-google-success.json`
 `DELETE /auth/me` -> **200**  
 _Firebase verification STUBBED (NOT VERIFIED LIVE against Firebase)_
 
@@ -417,7 +529,7 @@ Response:
 }
 ```
 
-### `15-delete-success.json`
+### `19-delete-success.json`
 `DELETE /auth/me` -> **200**  
 _customer: pending booking auto-cancelled, completed+paid history kept_
 
@@ -436,7 +548,7 @@ Response:
 }
 ```
 
-### `16-delete-repeat-same-token.json`
+### `20-delete-repeat-same-token.json`
 `DELETE /auth/me` -> **401**  
 _the token was revoked by the first delete_
 
@@ -454,7 +566,7 @@ Response:
 }
 ```
 
-### `17-me-after-delete.json`
+### `21-me-after-delete.json`
 `GET /profiles/customers/me` -> **401**  
 _same (revoked) token_
 
@@ -465,7 +577,7 @@ Response:
 }
 ```
 
-### `18-login-after-delete.json`
+### `22-login-after-delete.json`
 `POST /auth/login` -> **401**
 
 Request:
@@ -483,7 +595,7 @@ Response:
 }
 ```
 
-### `19-db-state-after-delete.json`
+### `23-db-state-after-delete.json`
 
 direct DB read after the delete (not an API response)
 
@@ -491,8 +603,8 @@ direct DB read after the delete (not an API response)
 {
   "user": {
     "full_name": "Deleted User",
-    "email": "deleted+e1d4d263ff52491590de2ce92267ffca@deleted.invalid",
-    "phone_number": "del_e1d4d263ff52",
+    "email": "deleted+4981d9d1bd7742cfa074684087d03b26@deleted.invalid",
+    "phone_number": "del_4981d9d1bd77",
     "hashed_password": null,
     "bio": null,
     "location_address": null,
@@ -517,7 +629,7 @@ direct DB read after the delete (not an API response)
       "released",
       "8000.00",
       "Deleted User",
-      "deleted+e1d4d263ff52491590de2ce92267ffca@deleted.invalid"
+      "deleted+4981d9d1bd7742cfa074684087d03b26@deleted.invalid"
     ]
   ],
   "push_devices": 0
@@ -534,5 +646,6 @@ direct DB read after the delete (not an API response)
 | Google-only re-auth: missing / stale / wrong account / fresh token | live against the real endpoint, but Firebase ID-token verification is **stubbed** in the capture server: **NOT VERIFIED LIVE against Firebase**. The real `auth_time` claim of a Firebase ID token (seconds since epoch) is assumed from Firebase's documented token claims |
 | `unfinished_withdrawal` blocker, `wallet_balance` for money still in the confirmation window, rejected pending booking for a deleted artisan, portfolio image removal from Cloudinary, every other token of the account dying | tests only |
 | Other tokens of the same account (other devices) stop working | tests only (they are rejected because the account is inactive) |
-| `refund_pending` blocker, 429 `too_many_attempts` (per-user limit), 409 `account_unavailable` on booking actions and payment initialisation, booking row locking under a concurrent deletion | tests only (the lock tests use a second database session and threads) |
+| `refund_pending` blocker for a dispute refund that is pending at Paystack (captured), change-password 400 then 429 `too_many_attempts` (captured) | **verified live** |
+| `refund_pending` for a payment flagged `needs_refund`, both parties for every in-flight refund state, delete-side 429 `too_many_attempts`, 409 `account_unavailable` on booking actions and payment initialisation, booking row locking under a concurrent deletion | tests only (the lock tests use a second database session and threads) |
 | Raw Paystack/payout JSON scrubbed on deletion | tests only |

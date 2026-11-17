@@ -3,8 +3,8 @@
   "state": {
     "user": {
       "full_name": "Deleted User",
-      "email": "deleted+e1d4d263ff52491590de2ce92267ffca@deleted.invalid",
-      "phone_number": "del_e1d4d263ff52",
+      "email": "deleted+4981d9d1bd7742cfa074684087d03b26@deleted.invalid",
+      "phone_number": "del_4981d9d1bd77",
       "hashed_password": null,
       "bio": null,
       "location_address": null,
@@ -29,7 +29,7 @@
         "released",
         "8000.00",
         "Deleted User",
-        "deleted+e1d4d263ff52491590de2ce92267ffca@deleted.invalid"
+        "deleted+4981d9d1bd7742cfa074684087d03b26@deleted.invalid"
       ]
     ],
     "push_devices": 0

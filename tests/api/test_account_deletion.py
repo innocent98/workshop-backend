@@ -746,3 +746,169 @@ def test_a_successful_delete_resets_nothing_it_needs_and_failures_expire(db, cli
     assert attempt_limit.failures("account_delete", str(u.id)) == 1
     assert delete(client, u, {"password": PW}).status_code == 200
     assert attempt_limit.failures("account_delete", str(u.id)) == 0  # cleared on success
+
+
+# ---------------------------------------- in-flight dispute refunds (review: blocker)
+
+
+def refund_resolution(db, booking, admin, refund_status):
+    from app.db.models.admin import DisputeResolution
+
+    db.add(
+        DisputeResolution(
+            booking_id=booking.id,
+            admin_id=admin.id,
+            resolution="refund_customer",
+            note="Artisan no-show",
+            refund_status=refund_status,
+            refund_reference="4242",
+        )
+    )
+    db.commit()
+
+
+@pytest.mark.parametrize("refund_status", ["requested", "pending", "processing", "needs-attention"])
+@pytest.mark.parametrize("side", ["customer", "artisan"])
+def test_in_flight_dispute_refund_blocks_both_parties(client, db, service, refund_status, side):
+    """refund_customer cancels the booking and marks the payment REFUNDED once Paystack accepts it;
+    a later refund.failed puts both back to disputed/success. Until the refund is final
+    (processed) neither party may delete, or the reopened dispute would be owed to a deleted user.
+    """
+    customer, artisan = user_with_pw(db), user_with_pw(db, user_type=UserType.ARTISAN)
+    admin = make_user(db, is_admin=True)
+    b = make_booking(
+        db,
+        service,
+        customer,
+        artisan,
+        status=BookingStatus.CANCELLED,
+        payment_status=PaymentStatus.REFUNDED,
+        disputed=False,
+    )
+    refund_resolution(db, b, admin, refund_status)
+    who = customer if side == "customer" else artisan
+    r = delete(client, who, {"password": PW})
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["code"] == "refund_pending"
+    assert blockers(r)["refund_pending"]["count"] == 1
+    db.expire_all()
+    assert db.get(User, who.id).is_active is True
+
+
+def test_a_processed_refund_no_longer_blocks(client, db, service):
+    customer, artisan = user_with_pw(db), make_user(db, user_type=UserType.ARTISAN)
+    admin = make_user(db, is_admin=True)
+    b = make_booking(
+        db,
+        service,
+        customer,
+        artisan,
+        status=BookingStatus.CANCELLED,
+        payment_status=PaymentStatus.REFUNDED,
+        disputed=False,
+    )
+    refund_resolution(db, b, admin, "processed")
+    assert delete(client, customer, {"password": PW}).status_code == 200
+
+
+def test_release_resolutions_never_block(client, db, service):
+    from app.db.models.admin import DisputeResolution
+
+    customer, artisan = user_with_pw(db), make_user(db, user_type=UserType.ARTISAN)
+    admin = make_user(db, is_admin=True)
+    b = make_booking(
+        db,
+        service,
+        customer,
+        artisan,
+        status=BookingStatus.COMPLETED,
+        payment_status=PaymentStatus.RELEASED,
+        disputed=False,
+    )
+    db.add(
+        DisputeResolution(
+            booking_id=b.id, admin_id=admin.id, resolution="release_to_artisan", note="ok ok"
+        )
+    )
+    db.commit()
+    assert delete(client, customer, {"password": PW}).status_code == 200
+
+
+def test_refund_failed_after_the_block_cannot_strand_money_on_a_deleted_account(
+    client, db, service, monkeypatch
+):
+    """End to end: while the refund is pending the delete is refused; once Paystack's failed event
+    reopens the dispute the booking is disputed (still blocking); only a processed refund frees it.
+    """
+    from app.services.admin import handle_refund_event
+    from app.services.paystack import PaystackService
+
+    customer, artisan = user_with_pw(db), make_user(db, user_type=UserType.ARTISAN)
+    admin = make_user(db, is_admin=True)
+    b = make_booking(
+        db,
+        service,
+        customer,
+        artisan,
+        status=BookingStatus.CANCELLED,
+        payment_status=PaymentStatus.REFUNDED,
+        disputed=False,
+    )
+    refund_resolution(db, b, admin, "pending")
+    assert delete(client, customer, {"password": PW}).status_code == 409
+    ref = db.query(Payment).one().paystack_reference
+    monkeypatch.setattr(PaystackService, "list_refunds", staticmethod(lambda tx: []))
+    assert (
+        handle_refund_event(db, "refund.failed", {"transaction_reference": ref, "id": 4242})
+        == "failed"
+    )
+    db.expire_all()
+    assert db.get(Booking, b.id).status == BookingStatus.DISPUTED
+    r = delete(client, customer, {"password": PW})
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "active_bookings"
+
+
+# ----------------------------------------------- change-password attempt limit (per user)
+
+CHANGE_URL = "/api/v1/auth/change-password"
+
+
+def change(client, user, current, new="Brand-new-pass-1"):
+    return client.post(
+        CHANGE_URL,
+        headers=auth(user),
+        json={"current_password": current, "new_password": new, "confirm_password": new},
+    )
+
+
+def test_change_password_wrong_attempts_are_limited_per_user(client, db):
+    u = user_with_pw(db)
+    for _ in range(5):
+        r = change(client, u, "wrong-password-1")
+        assert r.status_code == 400
+    r = change(client, u, PW)  # even the right password is refused while locked
+    assert r.status_code == 429 and r.json()["detail"]["code"] == "too_many_attempts"
+    db.expire_all()
+    assert verify_password(PW, db.get(User, u.id).hashed_password)  # unchanged
+
+    other = user_with_pw(db)
+    assert change(client, other, PW).status_code == 200  # another user is unaffected
+
+
+def test_change_password_success_clears_the_counter(client, db):
+    from app.core import attempt_limit
+
+    u = user_with_pw(db)
+    assert change(client, u, "wrong-password-1").status_code == 400
+    assert attempt_limit.failures("change_password", str(u.id)) == 1
+    assert change(client, u, PW).status_code == 200
+    assert attempt_limit.failures("change_password", str(u.id)) == 0
+
+
+def test_change_password_and_delete_counters_are_independent(client, db):
+    u = user_with_pw(db)
+    for _ in range(5):
+        change(client, u, "wrong-password-1")
+    # the delete counter is separate: a wrong delete password is a normal 403, not a lockout
+    r = delete(client, u, {"password": "wrong-password-1"})
+    assert r.status_code == 403

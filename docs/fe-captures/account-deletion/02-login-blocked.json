@@ -13,7 +13,7 @@
     "message": "Login successful",
     "token": "<jwt redacted>",
     "user": {
-      "id": "7e9e63ff-7b39-4faf-b6de-0086fbbeab13",
+      "id": "546bcb78-76ba-457b-a919-bf74a7f89db6",
       "full_name": "Blocked Customer",
       "email": "blocked@example.com",
       "phone_number": "+2348000000003",

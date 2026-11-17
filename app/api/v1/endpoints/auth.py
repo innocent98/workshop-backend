@@ -73,6 +73,8 @@ from app.utils.file_upload import delete_image
 
 router = APIRouter()
 
+CHANGE_PASSWORD_SCOPE = "change_password"
+
 
 # ============================================================================
 # REGISTRATION ENDPOINTS
@@ -470,13 +472,28 @@ def change_password(
 ):
     """
     Change password for authenticated user.
+
+    Wrong current passwords are counted per USER (5 per 15 minutes, then 429 ``too_many_attempts``)
+    so a stolen token cannot be used to guess the password here.
     """
-    AuthService.change_password(
-        db=db,
-        user=current_user,
-        current_password=body.current_password,
-        new_password=body.new_password,
-    )
+    if attempt_limit.is_locked(CHANGE_PASSWORD_SCOPE, str(current_user.id)):
+        raise _deletion_error(
+            "too_many_attempts",
+            "Too many incorrect attempts. Please try again in a few minutes.",
+            status.HTTP_429_TOO_MANY_REQUESTS,
+        )
+    try:
+        AuthService.change_password(
+            db=db,
+            user=current_user,
+            current_password=body.current_password,
+            new_password=body.new_password,
+        )
+    except HTTPException as exc:
+        if exc.detail == "Current password is incorrect":
+            attempt_limit.register_failure(CHANGE_PASSWORD_SCOPE, str(current_user.id))
+        raise
+    attempt_limit.clear(CHANGE_PASSWORD_SCOPE, str(current_user.id))
 
     return ChangePasswordResponse(
         message="Password changed successfully",

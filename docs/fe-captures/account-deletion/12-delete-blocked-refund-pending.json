@@ -1,0 +1,24 @@
+{
+  "request": {
+    "method": "DELETE",
+    "path": "/auth/me",
+    "body": {
+      "password": "Placeholder-pw-1"
+    }
+  },
+  "status": 409,
+  "response": {
+    "detail": {
+      "code": "refund_pending",
+      "message": "Your account cannot be deleted yet: A refund on one of your bookings is still being processed. Please wait.",
+      "blockers": [
+        {
+          "code": "refund_pending",
+          "count": 1,
+          "message": "A refund on one of your bookings is still being processed. Please wait."
+        }
+      ]
+    }
+  },
+  "note": "a dispute refund accepted by Paystack but not yet processed (refund_status pending)"
+}
