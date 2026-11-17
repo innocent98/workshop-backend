@@ -1,0 +1,11 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/admin/users",
+    "body": null
+  },
+  "status": 403,
+  "response": {
+    "detail": "Admin access required"
+  }
+}

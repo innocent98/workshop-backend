@@ -288,6 +288,78 @@ class PaystackService:
             raise PaystackError(f"Paystack API request failed: {str(e)}")
 
     @classmethod
+    def refund(
+        cls,
+        transaction_reference: str,
+        amount: Optional[Decimal] = None,
+        customer_note: Optional[str] = None,
+        merchant_note: Optional[str] = None,
+    ) -> Dict:
+        """
+        Refund a transaction (Paystack ``POST /refund``).
+
+        Args:
+            transaction_reference: Paystack transaction reference (or id) to refund
+            amount: Amount in Naira to refund; omit for a full refund
+            customer_note: Reason shown to the customer
+            merchant_note: Internal reason
+
+        Returns:
+            Refund data dict (``id``, ``status``: pending/processing/processed/failed, ...)
+
+        Raises:
+            PaystackError: ``status_code`` is the HTTP status when Paystack answered (a definite
+                answer, e.g. 400 "already reversed"), and None for timeouts/connection errors
+                (the refund may or may not have been processed: reconcile with ``list_refunds``).
+        """
+        url = f"{cls.BASE_URL}/refund"
+        payload: Dict = {"transaction": transaction_reference}
+        if amount is not None:
+            payload["amount"] = cls._naira_to_kobo(amount)
+        if customer_note:
+            payload["customer_note"] = customer_note
+        if merchant_note:
+            payload["merchant_note"] = merchant_note
+
+        try:
+            response = requests.post(url, json=payload, headers=cls._get_headers(), timeout=30)
+            response.raise_for_status()
+            data = response.json()
+        except requests.HTTPError as e:
+            code = getattr(e.response, "status_code", None)
+            raise PaystackError(f"Paystack refund rejected (HTTP {code})", status_code=code)
+        except (requests.RequestException, ValueError) as e:
+            raise PaystackError(f"Paystack API request failed: {type(e).__name__}")
+
+        if not data.get("status"):
+            raise PaystackError(data.get("message", "Refund request failed"), status_code=400)
+        return data["data"]
+
+    @classmethod
+    def list_refunds(cls, transaction_reference: str) -> list:
+        """List refunds for a transaction (Paystack ``GET /refund?transaction=``)."""
+        url = f"{cls.BASE_URL}/refund"
+        try:
+            response = requests.get(
+                url,
+                params={"transaction": transaction_reference},
+                headers=cls._get_headers(),
+                timeout=30,
+            )
+            response.raise_for_status()
+            data = response.json()
+        except requests.HTTPError as e:
+            raise PaystackError(
+                "Paystack refund lookup rejected",
+                status_code=getattr(e.response, "status_code", None),
+            )
+        except (requests.RequestException, ValueError) as e:
+            raise PaystackError(f"Paystack API request failed: {type(e).__name__}")
+        if not data.get("status"):
+            raise PaystackError(data.get("message", "Refund lookup failed"))
+        return data.get("data") or []
+
+    @classmethod
     def get_banks(cls) -> Dict:
         """
         Get list of supported banks.

@@ -1,0 +1,15 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/admin/bookings/3/resolve-dispute",
+    "body": null
+  },
+  "status": 409,
+  "response": {
+    "detail": {
+      "code": "not_disputed",
+      "message": "Booking has no open dispute."
+    }
+  },
+  "note": "booking 3 is PAID, not disputed"
+}

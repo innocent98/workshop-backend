@@ -140,6 +140,8 @@ class ArtisanProfileResponse(BaseModel):
     specialization: Optional[str] = None
     is_verified: bool
     verified_at: Optional[datetime] = None
+    # unverified | pending | verified | failed (additive; see /artisans/me/verification)
+    verification_status: str = "unverified"
     availability_status: AvailabilityStatus
 
     # Statistics

@@ -1,0 +1,22 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/profiles/artisans/me/verification/status",
+    "body": null
+  },
+  "status": 200,
+  "response": {
+    "verification_status": "verified",
+    "is_verified": true,
+    "verified_at": "2026-11-17T13:18:17.239005Z",
+    "verification_method": "admin",
+    "failure_reason": null,
+    "nin_last4": null,
+    "reference_id": "WC-NIN-666559b3e9052b48",
+    "attempts_used": 5,
+    "attempts_remaining": 0,
+    "max_attempts": 5,
+    "window_hours": 24,
+    "retry_available_at": "2026-11-18T13:18:16.915885Z"
+  }
+}

@@ -195,6 +195,7 @@ def get_my_artisan_profile(
         "specialization": artisan_profile.specialization,
         "is_verified": artisan_profile.is_verified,
         "verified_at": artisan_profile.verified_at,
+        "verification_status": artisan_profile.verification_status,
         "availability_status": artisan_profile.availability_status,
         "average_rating": artisan_profile.average_rating,
         "total_ratings": artisan_profile.total_ratings,
@@ -308,6 +309,7 @@ def update_my_artisan_profile(
             "specialization": artisan_profile.specialization,
             "is_verified": artisan_profile.is_verified,
             "verified_at": artisan_profile.verified_at,
+            "verification_status": artisan_profile.verification_status,
             "availability_status": artisan_profile.availability_status,
             "average_rating": artisan_profile.average_rating,
             "total_ratings": artisan_profile.total_ratings,
@@ -422,6 +424,7 @@ def update_artisan_availability(
             "specialization": artisan_profile.specialization,
             "is_verified": artisan_profile.is_verified,
             "verified_at": artisan_profile.verified_at,
+            "verification_status": artisan_profile.verification_status,
             "availability_status": artisan_profile.availability_status,
             "average_rating": artisan_profile.average_rating,
             "total_ratings": artisan_profile.total_ratings,
@@ -824,3 +827,4 @@ def get_artisan_portfolio(artisan_id: str, db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to fetch portfolio"
         )
+

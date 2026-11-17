@@ -1,0 +1,55 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/admin/disputes",
+    "body": null
+  },
+  "status": 200,
+  "response": {
+    "items": [
+      {
+        "booking_id": 1,
+        "booking_reference": "BKG-DEMO01",
+        "customer_id": "dc5cc74d-8d61-4b0c-a864-b38a796400a4",
+        "customer_name": "Demo Customer",
+        "artisan_id": "1cc2349f-2424-4f61-b2ce-9251c5d1c125",
+        "artisan_name": "Demo Artisan",
+        "agreed_amount": "8000.00",
+        "payment_status": "success",
+        "disputed_at": "2026-11-17T10:18:15.082681Z",
+        "dispute_reason": "Leak is still there",
+        "completion_notes": "Sink replaced"
+      },
+      {
+        "booking_id": 2,
+        "booking_reference": "BKG-DEMO02",
+        "customer_id": "dc5cc74d-8d61-4b0c-a864-b38a796400a4",
+        "customer_name": "Demo Customer",
+        "artisan_id": "1cc2349f-2424-4f61-b2ce-9251c5d1c125",
+        "artisan_name": "Demo Artisan",
+        "agreed_amount": "8000.00",
+        "payment_status": "success",
+        "disputed_at": "2026-11-17T10:18:15.096151Z",
+        "dispute_reason": "Leak is still there",
+        "completion_notes": "Sink replaced"
+      },
+      {
+        "booking_id": 4,
+        "booking_reference": "BKG-DEMO04",
+        "customer_id": "dc5cc74d-8d61-4b0c-a864-b38a796400a4",
+        "customer_name": "Demo Customer",
+        "artisan_id": "1cc2349f-2424-4f61-b2ce-9251c5d1c125",
+        "artisan_name": "Demo Artisan",
+        "agreed_amount": "8000.00",
+        "payment_status": "success",
+        "disputed_at": "2026-11-17T10:18:15.106530Z",
+        "dispute_reason": "Leak is still there",
+        "completion_notes": "Sink replaced"
+      }
+    ],
+    "total": 3,
+    "page": 1,
+    "page_size": 20,
+    "pages": 1
+  }
+}

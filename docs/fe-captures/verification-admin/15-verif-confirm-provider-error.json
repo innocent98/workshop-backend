@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/profiles/artisans/me/verification/confirm",
+    "body": {
+      "reference_id": "WC-NIN-d66496b951642494"
+    }
+  },
+  "status": 502,
+  "response": {
+    "detail": {
+      "code": "provider_error",
+      "message": "Could not reach the verification provider. Please try again shortly."
+    }
+  },
+  "note": "Dojah answers 503 (retried 3x then 502); verification stays pending"
+}

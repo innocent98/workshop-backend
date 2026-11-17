@@ -1,0 +1,15 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/admin/users?user_type=artisan&verification_status=failed",
+    "body": null
+  },
+  "status": 200,
+  "response": {
+    "items": [],
+    "total": 0,
+    "page": 1,
+    "page_size": 20,
+    "pages": 0
+  }
+}

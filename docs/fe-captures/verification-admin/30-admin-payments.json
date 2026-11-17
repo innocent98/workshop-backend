@@ -1,0 +1,48 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/admin/payments?status=success&page_size=2",
+    "body": null
+  },
+  "status": 200,
+  "response": {
+    "items": [
+      {
+        "id": 4,
+        "payment_reference": "PAY-DEMO04",
+        "booking_id": 4,
+        "booking_reference": "BKG-DEMO04",
+        "status": "success",
+        "amount": "8000.00",
+        "platform_fee": "800.00",
+        "artisan_amount": "7200.00",
+        "currency": "NGN",
+        "customer_email": "client@example.com",
+        "paid_at": null,
+        "released_at": null,
+        "refunded_at": null,
+        "created_at": "2026-11-17T13:18:15.106148Z"
+      },
+      {
+        "id": 3,
+        "payment_reference": "PAY-DEMO03",
+        "booking_id": 3,
+        "booking_reference": "BKG-DEMO03",
+        "status": "success",
+        "amount": "8000.00",
+        "platform_fee": "800.00",
+        "artisan_amount": "7200.00",
+        "currency": "NGN",
+        "customer_email": "client@example.com",
+        "paid_at": null,
+        "released_at": null,
+        "refunded_at": null,
+        "created_at": "2026-11-17T13:18:15.101778Z"
+      }
+    ],
+    "total": 4,
+    "page": 1,
+    "page_size": 2,
+    "pages": 2
+  }
+}

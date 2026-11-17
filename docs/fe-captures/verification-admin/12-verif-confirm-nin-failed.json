@@ -1,0 +1,25 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/profiles/artisans/me/verification/confirm",
+    "body": {
+      "reference_id": "WC-NIN-1025e2aefff8aaae"
+    }
+  },
+  "status": 200,
+  "response": {
+    "verification_status": "failed",
+    "is_verified": false,
+    "verified_at": null,
+    "verification_method": null,
+    "failure_reason": "We could not verify this NIN. Check the number and try again.",
+    "nin_last4": null,
+    "reference_id": "WC-NIN-1025e2aefff8aaae",
+    "attempts_used": 2,
+    "attempts_remaining": 3,
+    "max_attempts": 5,
+    "window_hours": 24,
+    "retry_available_at": null
+  },
+  "note": "Dojah says Failed + government_data.status=false"
+}

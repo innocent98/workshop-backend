@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/admin/artisans/ff166d8a-d62a-4d5f-84ce-32df24db15ac/reject",
+    "body": {
+      "note": "ID photo unreadable"
+    }
+  },
+  "status": 200,
+  "response": {
+    "user_id": "ff166d8a-d62a-4d5f-84ce-32df24db15ac",
+    "is_verified": false,
+    "verification_status": "failed",
+    "verification_method": "admin",
+    "verified_at": null,
+    "verification_failure_reason": "ID photo unreadable"
+  }
+}

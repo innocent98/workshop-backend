@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/admin/bookings/4/resolve-dispute",
+    "body": {
+      "resolution": "refund_customer",
+      "note": "Customer proved the job was never done"
+    }
+  },
+  "status": 502,
+  "response": {
+    "detail": {
+      "code": "refund_unconfirmed",
+      "message": "Paystack did not answer and no refund was found. The refund is recorded as requested, so the payment cannot be released; retry to reconcile."
+    }
+  },
+  "note": "Paystack stub: request times out and the refund lookup finds nothing => outcome unknown"
+}

@@ -206,19 +206,14 @@ class AuthService:
         # Mark email as verified
         user.is_email_verified = True
 
-        # Temporary rule: once email is verified, auto-verify artisan profile.
-        # This can be replaced later with stricter KYC/face-verification flow.
+        # Artisans are NOT auto-verified any more: identity verification (NIN + selfie
+        # via Dojah, or admin override) is a separate flow. Just make sure a profile exists.
         if user.user_type == UserType.ARTISAN:
             artisan_profile = (
                 db.query(ArtisanProfile).filter(ArtisanProfile.user_id == user.id).first()
             )
             if not artisan_profile:
-                artisan_profile = ArtisanProfile(user_id=user.id)
-                db.add(artisan_profile)
-
-            if not artisan_profile.is_verified:
-                artisan_profile.is_verified = True
-                artisan_profile.verified_at = datetime.now(timezone.utc)
+                db.add(ArtisanProfile(user_id=user.id))
 
         db.commit()
         db.refresh(user)

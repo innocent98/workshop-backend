@@ -70,6 +70,17 @@ class ArtisanProfile(Base):
     verified_at = Column(DateTime(timezone=True), nullable=True)
     verified_by = Column(UUID(as_uuid=True), nullable=True)  # Admin user who verified
 
+    # Identity verification (NIN + live selfie via Dojah, or admin override).
+    # The NIN/selfie go to Dojah's hosted widget, never to us; at most the last 4 NIN digits are kept.
+    # Per-attempt history lives in artisan_verification_records.
+    verification_status = Column(
+        String(16), nullable=False, default="unverified", server_default="unverified", index=True
+    )  # unverified | pending | verified | failed
+    verification_method = Column(String(16), nullable=True)  # dojah | admin | legacy
+    verification_reference = Column(String(100), nullable=True)
+    verification_failure_reason = Column(Text, nullable=True)
+    nin_last4 = Column(String(4), nullable=True)
+
     # Availability
     availability_status = Column(
         Enum(AvailabilityStatus, native_enum=False),

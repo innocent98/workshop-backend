@@ -1,0 +1,15 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/verification/webhook",
+    "body": {
+      "reference_id": "WC-NIN-ba35e19900cdbe76",
+      "verification_status": "Completed"
+    }
+  },
+  "status": 200,
+  "response": {
+    "status": "ok"
+  },
+  "note": "header x-dojah-signature = HMAC-SHA256(raw body, DOJAH_WEBHOOK_SECRET) hex"
+}

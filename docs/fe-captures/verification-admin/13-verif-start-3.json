@@ -1,0 +1,14 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/profiles/artisans/me/verification/start",
+    "body": null
+  },
+  "status": 200,
+  "response": {
+    "reference_id": "WC-NIN-d66496b951642494",
+    "widget_id": "capture-nin-widget",
+    "email": "artisan@example.com",
+    "attempts_remaining": 2
+  }
+}

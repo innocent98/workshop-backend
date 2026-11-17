@@ -1,0 +1,25 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/profiles/artisans/me/verification/confirm",
+    "body": {
+      "reference_id": "WC-NIN-d66496b951642494"
+    }
+  },
+  "status": 200,
+  "response": {
+    "verification_status": "verified",
+    "is_verified": true,
+    "verified_at": "2026-11-17T13:18:16.153948Z",
+    "verification_method": "dojah",
+    "failure_reason": null,
+    "nin_last4": "1117",
+    "reference_id": "WC-NIN-d66496b951642494",
+    "attempts_used": 3,
+    "attempts_remaining": 2,
+    "max_attempts": 5,
+    "window_hours": 24,
+    "retry_available_at": null
+  },
+  "note": "Dojah says Completed, NIN verified, selfie passed"
+}

@@ -92,6 +92,24 @@ class Settings(BaseSettings):
         "/app/app/service_account/workchop-b3069-firebase-adminsdk-fbsvc-75e0bff73a.json"
     )
 
+    # Dojah (artisan NIN + selfie verification via the hosted Identity widget).
+    # The mobile app launches the widget with DOJAH_APP_ID / DOJAH_PUBLIC_KEY /
+    # DOJAH_NIN_WIDGET_ID (served by GET /profiles/artisans/me/verification/config); the
+    # backend only reads results server-side with DOJAH_API_KEY (the app secret key) and
+    # verifies webhooks with DOJAH_WEBHOOK_SECRET (the per-subscription secret from
+    # Dojah Developers > Webhooks, NOT the API key). Sandbox keys only work on
+    # sandbox.dojah.io, production keys on api.dojah.io: DOJAH_ENVIRONMENT picks the host
+    # unless DOJAH_BASE_URL is set to something non-default.
+    DOJAH_API_KEY: Optional[str] = None
+    DOJAH_APP_ID: Optional[str] = None
+    DOJAH_PUBLIC_KEY: Optional[str] = None
+    DOJAH_NIN_WIDGET_ID: Optional[str] = None
+    DOJAH_WEBHOOK_SECRET: Optional[str] = None
+    DOJAH_ENVIRONMENT: str = "sandbox"
+    DOJAH_BASE_URL: str = "https://api.dojah.io"
+    VERIFICATION_MAX_ATTEMPTS: int = 5
+    VERIFICATION_WINDOW_HOURS: int = 24
+
     # Admin
     FIRST_SUPERUSER_EMAIL: EmailStr
     FIRST_SUPERUSER_PASSWORD: str

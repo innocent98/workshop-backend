@@ -53,6 +53,9 @@ class User(Base):
     is_email_verified = Column(Boolean, default=False, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     registration_completed = Column(Boolean, default=False, nullable=False)
+    # Admin is a flag, not a user type: admins keep user_type CLIENT/ARTISAN and
+    # log in through the normal /auth/login. Granted only via scripts/create_admin.py.
+    is_admin = Column(Boolean, default=False, nullable=False, server_default="false")
 
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

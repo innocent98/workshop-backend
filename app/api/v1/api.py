@@ -1,6 +1,8 @@
 from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
+    admin,
+    artisan_verification,
     auth,
     bookings,
     health,
@@ -25,3 +27,12 @@ api_router.include_router(payments.router, prefix="/payments", tags=["payments"]
 api_router.include_router(reviews.router, prefix="/reviews", tags=["reviews"])
 api_router.include_router(wallet.router, prefix="/wallet", tags=["wallet"])
 api_router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
+api_router.include_router(admin.router, prefix="/admin", tags=["admin"])
+api_router.include_router(
+    artisan_verification.router,
+    prefix="/profiles/artisans/me/verification",
+    tags=["artisan-verification"],
+)
+api_router.include_router(
+    artisan_verification.webhook_router, prefix="/verification", tags=["artisan-verification"]
+)

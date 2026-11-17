@@ -1,0 +1,67 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/admin/bookings?status=disputed",
+    "body": null
+  },
+  "status": 200,
+  "response": {
+    "items": [
+      {
+        "id": 4,
+        "booking_reference": "BKG-DEMO04",
+        "status": "disputed",
+        "customer_id": "dc5cc74d-8d61-4b0c-a864-b38a796400a4",
+        "customer_name": "Demo Customer",
+        "artisan_id": "1cc2349f-2424-4f61-b2ce-9251c5d1c125",
+        "artisan_name": "Demo Artisan",
+        "agreed_amount": "8000.00",
+        "budget_min": "5000.00",
+        "budget_max": "10000.00",
+        "job_date": "2026-11-18T13:18:15.106530Z",
+        "payment_status": "success",
+        "completion_disputed_at": "2026-11-17T10:18:15.106530Z",
+        "completion_confirmed_by_client_at": null,
+        "created_at": "2026-11-17T13:18:15.106148Z"
+      },
+      {
+        "id": 2,
+        "booking_reference": "BKG-DEMO02",
+        "status": "disputed",
+        "customer_id": "dc5cc74d-8d61-4b0c-a864-b38a796400a4",
+        "customer_name": "Demo Customer",
+        "artisan_id": "1cc2349f-2424-4f61-b2ce-9251c5d1c125",
+        "artisan_name": "Demo Artisan",
+        "agreed_amount": "8000.00",
+        "budget_min": "5000.00",
+        "budget_max": "10000.00",
+        "job_date": "2026-11-18T13:18:15.096151Z",
+        "payment_status": "success",
+        "completion_disputed_at": "2026-11-17T10:18:15.096151Z",
+        "completion_confirmed_by_client_at": null,
+        "created_at": "2026-11-17T13:18:15.095964Z"
+      },
+      {
+        "id": 1,
+        "booking_reference": "BKG-DEMO01",
+        "status": "disputed",
+        "customer_id": "dc5cc74d-8d61-4b0c-a864-b38a796400a4",
+        "customer_name": "Demo Customer",
+        "artisan_id": "1cc2349f-2424-4f61-b2ce-9251c5d1c125",
+        "artisan_name": "Demo Artisan",
+        "agreed_amount": "8000.00",
+        "budget_min": "5000.00",
+        "budget_max": "10000.00",
+        "job_date": "2026-11-18T13:18:15.082681Z",
+        "payment_status": "success",
+        "completion_disputed_at": "2026-11-17T10:18:15.082681Z",
+        "completion_confirmed_by_client_at": null,
+        "created_at": "2026-11-17T13:18:15.082895Z"
+      }
+    ],
+    "total": 3,
+    "page": 1,
+    "page_size": 20,
+    "pages": 1
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/admin/bookings/4/resolve-dispute",
+    "body": {
+      "resolution": "release_to_artisan",
+      "note": "Changed my mind"
+    }
+  },
+  "status": 409,
+  "response": {
+    "detail": {
+      "code": "refund_in_progress",
+      "message": "A refund exists for this booking (confirmed, or its outcome is still being reconciled), so the payment cannot be released to the artisan."
+    }
+  },
+  "note": "a refund intent exists, so paying the artisan is refused (double-spend guard)"
+}

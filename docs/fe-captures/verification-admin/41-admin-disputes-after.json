@@ -1,0 +1,15 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/admin/disputes",
+    "body": null
+  },
+  "status": 200,
+  "response": {
+    "items": [],
+    "total": 0,
+    "page": 1,
+    "page_size": 20,
+    "pages": 0
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/profiles/artisans/me/verification/status",
+    "body": null
+  },
+  "status": 200,
+  "response": {
+    "verification_status": "pending",
+    "is_verified": false,
+    "verified_at": null,
+    "verification_method": null,
+    "failure_reason": null,
+    "nin_last4": null,
+    "reference_id": "WC-NIN-1cf04fc37c1e8825",
+    "attempts_used": 1,
+    "attempts_remaining": 4,
+    "max_attempts": 5,
+    "window_hours": 24,
+    "retry_available_at": null
+  },
+  "note": "no Dojah answer scripted yet => Dojah 404 for the reference; status poll tolerates it"
+}
