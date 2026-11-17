@@ -1,0 +1,33 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/wallet/payouts",
+    "headers": {
+      "Authorization": "Bearer <artisan access token>"
+    },
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "payouts": [],
+      "total": 0,
+      "page": 1,
+      "page_size": 20,
+      "withdrawals": [
+        {
+          "id": 1,
+          "reference": "wdr_9a23832a315c4610a6f79fe9324e443d",
+          "amount": "9000.00",
+          "currency": "NGN",
+          "status": "processing",
+          "bank_code": "057",
+          "account_number_last4": "0000",
+          "account_name": "JANE PLACEHOLDER",
+          "created_at": "2026-11-17T13:14:46.350181Z",
+          "completed_at": null
+        }
+      ]
+    }
+  }
+}

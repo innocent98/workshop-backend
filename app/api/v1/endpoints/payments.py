@@ -2,11 +2,10 @@
 Payment endpoints for managing Paystack transactions.
 """
 from typing import Optional
+from starlette.concurrency import run_in_threadpool
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Header
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 import json
-from datetime import datetime
 from decimal import Decimal
 
 from app.db.session import get_db
@@ -14,18 +13,29 @@ from app.api.deps import get_current_user
 from app.core.config import settings
 from app.db.models.user import User, UserType
 from app.db.models.booking import Booking, BookingStatus
-from app.db.models.payment import Payment, PaymentStatus, PaymentMethod
+from app.db.models.payment import Payment, PaymentStatus
+from app.db.models.withdrawal import WithdrawalStatus
 from app.schemas.payment import (
     InitializePaymentRequest,
     InitializePaymentResponse,
     PaymentResponse,
-    PaymentWebhookPayload,
     ReleasePaymentRequest,
     VerifyPaymentResponse,
 )
 from app.utils.payment_reference import generate_payment_reference
 from app.utils.commission import calculate_artisan_amount, calculate_platform_fee
 from app.services.paystack import PaystackService, PaystackError
+from app.core.logger import logger
+from app.services.payment_service import (
+    OUTCOME_ALREADY,
+    OUTCOME_MISMATCH,
+    OUTCOME_NOT_FOUND,
+    apply_charge_failed,
+    apply_charge_success,
+    archive_payment_reference,
+    find_payment_by_reference,
+)
+from app.services.withdrawal_service import settle_transfer_failure, settle_transfer_success
 from app.tasks.notification_tasks import send_push_notification
 
 
@@ -57,7 +67,7 @@ def _notify_user(user_id, title: str, body: str, data: Optional[dict] = None) ->
 
 
 @router.post("/initialize", response_model=InitializePaymentResponse, status_code=status.HTTP_201_CREATED)
-async def initialize_payment(
+def initialize_payment(
     request: InitializePaymentRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -162,6 +172,8 @@ async def initialize_payment(
 
         # If an existing failed/refunded record exists, reuse it for a new checkout attempt.
         if existing_payment and existing_payment.status in [PaymentStatus.FAILED, PaymentStatus.REFUNDED]:
+            # keep the old reference(s): a late charge.success for them must still find this payment
+            archive_payment_reference(db, existing_payment)
             existing_payment.payment_reference = payment_reference
             existing_payment.paystack_reference = paystack_response.get('reference')
             existing_payment.paystack_access_code = paystack_response.get('access_code')
@@ -229,7 +241,7 @@ async def initialize_payment(
 
 
 @router.get("/verify/{reference}", response_model=VerifyPaymentResponse)
-async def verify_payment(
+def verify_payment(
     reference: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -240,7 +252,7 @@ async def verify_payment(
     Checks with Paystack and updates local payment record.
     """
     # Get payment by reference
-    payment = db.query(Payment).filter(Payment.payment_reference == reference).first()
+    payment = find_payment_by_reference(db, reference)
     if not payment:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -278,52 +290,92 @@ async def verify_payment(
     try:
         # Verify with Paystack
         verification_response = PaystackService.verify_transaction(reference)
+    except PaystackError as e:
+        logger.error(f"Paystack verify failed for {reference}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Could not verify payment with the payment provider. Please try again."
+        )
 
-        # Update payment status
-        if verification_response.get('status') == 'success':
-            payment.status = PaymentStatus.SUCCESS
-            payment.paid_at = datetime.utcnow()
-            payment.payment_method = PaymentMethod(verification_response.get('channel', 'card'))
-            payment.paystack_response = json.dumps(verification_response)
-
-            # Update booking status to PAID
-            booking.status = BookingStatus.PAID
-            booking.paid_at = datetime.utcnow()
-
-            db.commit()
-            _notify_user(
-                booking.artisan_id,
-                "Payment received",
-                "Client has paid for a booking. You can now start the job.",
-                {"booking_id": str(booking.id), "event": "payment_success"},
-            )
-
-            return {
-                "payment_reference": payment.payment_reference,
-                "status": payment.status.value,
-                "amount": payment.amount,
-                "paid": True,
-                "message": "Payment verified successfully"
-            }
-        else:
-            payment.status = PaymentStatus.FAILED
-            payment.failed_at = datetime.utcnow()
-            payment.paystack_response = json.dumps(verification_response)
-            db.commit()
-
+    paystack_status = verification_response.get('status')
+    if paystack_status == 'success':
+        # Same settlement function as the webhook: idempotent, amount/currency checked.
+        result = apply_charge_success(db, reference, verification_response)
+        db.refresh(payment)
+        if result.outcome == OUTCOME_MISMATCH:
             return {
                 "payment_reference": payment.payment_reference,
                 "status": payment.status.value,
                 "amount": payment.amount,
                 "paid": False,
-                "message": "Payment verification failed"
+                "message": "Payment amount could not be confirmed. Please contact support.",
             }
+        return {
+            "payment_reference": payment.payment_reference,
+            "status": payment.status.value,
+            "amount": payment.amount,
+            "paid": True,
+            "message": "Payment verified successfully"
+        }
 
-    except PaystackError as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Payment verification failed: {str(e)}"
+    if paystack_status == 'failed':
+        apply_charge_failed(db, reference, verification_response)
+        db.refresh(payment)
+        return {
+            "payment_reference": payment.payment_reference,
+            "status": payment.status.value,
+            "amount": payment.amount,
+            "paid": False,
+            "message": "Payment verification failed"
+        }
+
+    # abandoned / ongoing / pending: the customer has not finished paying yet.
+    return {
+        "payment_reference": payment.payment_reference,
+        "status": payment.status.value,
+        "amount": payment.amount,
+        "paid": False,
+        "message": "Payment not completed yet"
+    }
+
+
+def _handle_webhook_event(db: Session, event: Optional[str], data: dict) -> dict:
+    """Blocking part of the webhook (DB locks, row updates): runs in the threadpool."""
+    if event == 'charge.success':
+        reference = data.get('reference')
+        if not reference:
+            return {"status": "ignored", "message": "No reference in payload"}
+        result = apply_charge_success(db, reference, data)
+        if result.outcome == OUTCOME_NOT_FOUND:
+            return {"status": "ignored", "message": "Payment not found"}
+        if result.outcome == OUTCOME_MISMATCH:
+            # 200 so Paystack stops retrying; the mismatch is logged for manual review.
+            return {"status": "ignored", "message": "Amount or currency mismatch"}
+        if result.outcome == OUTCOME_ALREADY:
+            return {"status": "success", "message": "Payment already processed"}
+        return {"status": "success", "message": "Payment processed"}
+
+    if event == 'charge.failed':
+        reference = data.get('reference')
+        if not reference:
+            return {"status": "ignored", "message": "No reference in payload"}
+        result = apply_charge_failed(db, reference, data)
+        if result.outcome == OUTCOME_NOT_FOUND:
+            return {"status": "ignored", "message": "Payment not found"}
+        return {"status": "success", "message": "Payment failure recorded"}
+
+    if event == 'transfer.success':
+        outcome = settle_transfer_success(db, data)
+        return {"status": "success", "message": f"Transfer {outcome}"}
+
+    if event in ('transfer.failed', 'transfer.reversed'):
+        new_status = (
+            WithdrawalStatus.FAILED if event == 'transfer.failed' else WithdrawalStatus.REVERSED
         )
+        outcome = settle_transfer_failure(db, data, new_status)
+        return {"status": "success", "message": f"Transfer {outcome}"}
+
+    return {"status": "ignored", "message": f"Unhandled event: {event}"}
 
 
 @router.post("/webhook", status_code=status.HTTP_200_OK)
@@ -358,49 +410,8 @@ async def paystack_webhook(
         )
 
     event = payload.get('event')
-    data = payload.get('data', {})
-
-    # Handle charge.success event
-    if event == 'charge.success':
-        reference = data.get('reference')
-        if not reference:
-            return {"status": "ignored", "message": "No reference in payload"}
-
-        # Find payment
-        payment = db.query(Payment).filter(Payment.payment_reference == reference).first()
-        if not payment:
-            return {"status": "ignored", "message": "Payment not found"}
-
-        # Skip if already processed
-        if payment.status == PaymentStatus.SUCCESS:
-            return {"status": "success", "message": "Payment already processed"}
-
-        # Update payment
-        payment.status = PaymentStatus.SUCCESS
-        payment.paid_at = datetime.utcnow()
-        payment.payment_method = PaymentMethod(data.get('channel', 'card'))
-        payment.paystack_response = json.dumps(data)
-        payment.paystack_reference = data.get('reference')
-
-        # Update booking
-        booking = db.query(Booking).filter(Booking.id == payment.booking_id).first()
-        if booking:
-            booking.status = BookingStatus.PAID
-            booking.paid_at = datetime.utcnow()
-
-        db.commit()
-
-        if booking:
-            _notify_user(
-                booking.artisan_id,
-                "Payment received",
-                "Client has paid for a booking. You can now start the job.",
-                {"booking_id": str(booking.id), "event": "payment_success"},
-            )
-
-        return {"status": "success", "message": "Payment processed"}
-
-    return {"status": "ignored", "message": f"Unhandled event: {event}"}
+    data = payload.get('data') or {}
+    return await run_in_threadpool(_handle_webhook_event, db, event, data)
 
 
 @router.get("/{payment_id}", response_model=PaymentResponse)
@@ -444,123 +455,16 @@ async def release_payment(
     payment_id: int,
     request: ReleasePaymentRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
 ):
     """
-    Release payment to artisan.
+    Disabled for everyone.
 
-    Admin or automated process releases funds after job completion.
-    For now, allowing artisan to trigger release (in production, this should be admin-only).
+    Releasing funds used to be callable by the artisan and only flipped a database flag
+    (no money moved). Payouts now happen exclusively through `POST /wallet/payout/request`
+    and Paystack transfer webhooks. This route stays disabled until an admin-only role
+    exists (see `require_admin`).
     """
-    payment = db.query(Payment).filter(Payment.id == payment_id).first()
-    if not payment:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Payment not found"
-        )
-
-    # Get booking
-    booking = db.query(Booking).filter(Booking.id == payment.booking_id).first()
-    if not booking:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Booking not found"
-        )
-
-    # Check permission (in production, should be admin only)
-    # For now, allowing artisan to release
-    if booking.artisan_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You don't have permission to release this payment"
-        )
-
-    # Check payment status
-    if payment.status != PaymentStatus.SUCCESS:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot release payment in {payment.status.value} status"
-        )
-
-    # Check if already released
-    if payment.status == PaymentStatus.RELEASED:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Payment already released"
-        )
-
-    # Check if booking is completed
-    if booking.status != BookingStatus.COMPLETED:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot release payment. Job must be completed first."
-        )
-
-    # Guard release with client confirmation/dispute-window rule
-    now_utc = datetime.utcnow()
-    is_confirmed = booking.completion_confirmed_by_client_at is not None
-    dispute_window_elapsed = (
-        booking.completion_confirmation_deadline_at is not None
-        and booking.completion_confirmation_deadline_at <= now_utc
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Manual payment release is disabled. Withdraw your balance from the wallet instead."
     )
-    if booking.completion_disputed_at is not None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot release payment for disputed completion."
-        )
-    if not (is_confirmed or dispute_window_elapsed):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot release payment until customer confirms completion or dispute window elapses."
-        )
-
-    try:
-        # For now, we'll just mark as released without actual transfer
-        # In production, you would:
-        # 1. Create transfer recipient if not exists
-        # 2. Initiate transfer via Paystack
-        # 3. Store transfer reference
-
-        # TODO: Implement actual Paystack transfer
-        # if request.recipient_code:
-        #     transfer_response = PaystackService.initiate_transfer(
-        #         recipient_code=request.recipient_code,
-        #         amount=payment.amount,
-        #         reason=f"Payment for booking {booking.booking_reference}",
-        #         reference=f"PAYOUT-{payment.payment_reference}"
-        #     )
-        # elif request.account_number and request.bank_code:
-        #     # Create recipient first
-        #     recipient = PaystackService.create_transfer_recipient(
-        #         name=request.account_name or booking.artisan.full_name,
-        #         account_number=request.account_number,
-        #         bank_code=request.bank_code
-        #     )
-        #     transfer_response = PaystackService.initiate_transfer(...)
-
-        # For now, just mark as released
-        if payment.platform_fee is None or payment.artisan_amount is None:
-            platform_fee, artisan_amount = _payment_split(payment.amount)
-            payment.platform_fee = platform_fee
-            payment.artisan_amount = artisan_amount
-        payment.status = PaymentStatus.RELEASED
-        payment.released_at = datetime.utcnow()
-        payment.payout_reference = f"PAYOUT-{payment.payment_reference}"
-
-        db.commit()
-        db.refresh(payment)
-
-        _notify_user(
-            booking.artisan_id,
-            "Payment released",
-            "A completed booking payment has been released to your wallet flow.",
-            {"booking_id": str(booking.id), "event": "payment_released"},
-        )
-
-        return payment
-
-    except PaystackError as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Payment release failed: {str(e)}"
-        )

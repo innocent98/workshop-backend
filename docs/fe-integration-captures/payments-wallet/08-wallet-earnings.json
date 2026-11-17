@@ -1,0 +1,114 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/wallet/earnings",
+    "headers": {
+      "Authorization": "Bearer <artisan access token>"
+    },
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "earnings": [
+        {
+          "payment_id": 5,
+          "payment_reference": "PAY-26321131446-981",
+          "booking_id": 4,
+          "booking_reference": "BK-CAP-LIVE",
+          "amount": "13500.00",
+          "gross_amount": "15000.00",
+          "platform_fee": "1500.00",
+          "status": "success",
+          "customer_name": "Placeholder Client",
+          "service_name": "Placeholder Plumbing",
+          "job_date": "2026-11-18T13:14:46.084214Z",
+          "paid_at": "2026-11-17T13:14:46.221304Z",
+          "released_at": null,
+          "created_at": "2026-11-17T13:14:46.191177Z",
+          "withdrawal_id": null,
+          "withdrawal_status": null
+        },
+        {
+          "payment_id": 1,
+          "payment_reference": "PAY-CAP-1",
+          "booking_id": 1,
+          "booking_reference": "BK-CAP-3",
+          "amount": "9000.00",
+          "gross_amount": "10000.00",
+          "platform_fee": "1000.00",
+          "status": "success",
+          "customer_name": "Placeholder Client",
+          "service_name": "Placeholder Plumbing",
+          "job_date": "2026-11-18T13:14:46.084214Z",
+          "paid_at": "2026-11-14T13:14:46.084214Z",
+          "released_at": null,
+          "created_at": "2026-11-17T13:14:46.105436Z",
+          "withdrawal_id": null,
+          "withdrawal_status": null
+        },
+        {
+          "payment_id": 2,
+          "payment_reference": "PAY-CAP-2",
+          "booking_id": 2,
+          "booking_reference": "BK-CAP-2",
+          "amount": "18000.00",
+          "gross_amount": "20000.00",
+          "platform_fee": "2000.00",
+          "status": "success",
+          "customer_name": "Placeholder Client",
+          "service_name": "Placeholder Plumbing",
+          "job_date": "2026-11-18T13:14:46.084214Z",
+          "paid_at": "2026-11-15T13:14:46.084214Z",
+          "released_at": null,
+          "created_at": "2026-11-17T13:14:46.105436Z",
+          "withdrawal_id": null,
+          "withdrawal_status": null
+        },
+        {
+          "payment_id": 3,
+          "payment_reference": "PAY-CAP-3",
+          "booking_id": 3,
+          "booking_reference": "BK-CAP-1",
+          "amount": "27000.00",
+          "gross_amount": "30000.00",
+          "platform_fee": "3000.00",
+          "status": "success",
+          "customer_name": "Placeholder Client",
+          "service_name": "Placeholder Plumbing",
+          "job_date": "2026-11-18T13:14:46.084214Z",
+          "paid_at": "2026-11-16T13:14:46.084214Z",
+          "released_at": null,
+          "created_at": "2026-11-17T13:14:46.105436Z",
+          "withdrawal_id": null,
+          "withdrawal_status": null
+        },
+        {
+          "payment_id": 4,
+          "payment_reference": "PAY-CAP-MISMATCH",
+          "booking_id": 5,
+          "booking_reference": "BK-CAP-MISMATCH",
+          "amount": "4500.00",
+          "gross_amount": "5000.00",
+          "platform_fee": "500.00",
+          "status": "pending",
+          "customer_name": "Placeholder Client",
+          "service_name": "Placeholder Plumbing",
+          "job_date": "2026-11-18T13:14:46.084214Z",
+          "paid_at": null,
+          "released_at": null,
+          "created_at": "2026-11-17T13:14:46.105436Z",
+          "withdrawal_id": null,
+          "withdrawal_status": null
+        }
+      ],
+      "total": 5,
+      "page": 1,
+      "page_size": 20,
+      "summary": {
+        "total_amount": "67500.00",
+        "count": 5
+      }
+    }
+  }
+}

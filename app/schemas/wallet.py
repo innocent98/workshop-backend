@@ -12,6 +12,10 @@ class WalletBalanceResponse(BaseModel):
     total_jobs_completed: int  # Total completed jobs
     total_jobs_paid: int  # Total paid jobs
     lifetime_earnings: Decimal  # All-time earnings
+    # Additive fields (withdrawal ledger)
+    available_balance: Decimal = Decimal("0")  # withdrawable now (same value as pending_release)
+    pending_withdrawal: Decimal = Decimal("0")  # inside a withdrawal that is still processing
+    min_payout: Optional[Decimal] = None  # minimum withdrawal amount (MIN_PAYOUT_NGN)
 
     model_config = ConfigDict(json_schema_extra={
         "example": {
@@ -41,6 +45,9 @@ class EarningItemResponse(BaseModel):
     paid_at: Optional[datetime]
     released_at: Optional[datetime]
     created_at: datetime
+    # Additive fields
+    withdrawal_id: Optional[int] = None
+    withdrawal_status: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -65,8 +72,23 @@ class PayoutItemResponse(BaseModel):
     released_at: Optional[datetime]
     booking_reference: str
     customer_name: str
+    withdrawal_id: Optional[int] = None  # additive
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class WithdrawalItemResponse(BaseModel):
+    """A withdrawal (one bank transfer) - additive, any status"""
+    id: int
+    reference: str
+    amount: Decimal
+    currency: str
+    status: str  # processing | success | failed | reversed
+    bank_code: str
+    account_number_last4: str
+    account_name: Optional[str] = None
+    created_at: datetime
+    completed_at: Optional[datetime] = None
 
 
 class PayoutsHistoryResponse(BaseModel):
@@ -75,6 +97,7 @@ class PayoutsHistoryResponse(BaseModel):
     total: int
     page: int
     page_size: int
+    withdrawals: List[WithdrawalItemResponse] = []  # additive
 
 
 class RequestPayoutRequest(BaseModel):
@@ -103,6 +126,11 @@ class RequestPayoutResponse(BaseModel):
     account_number: str
     bank_code: str
     status: str
+    # Additive fields
+    withdrawal_id: Optional[int] = None
+    requested_amount: Optional[Decimal] = None
+    payments_count: Optional[int] = None
+    idempotent_replay: bool = False
 
 
 class BankItemResponse(BaseModel):

@@ -1,0 +1,58 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/wallet/payouts",
+    "headers": {
+      "Authorization": "Bearer <artisan access token>"
+    },
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "payouts": [
+        {
+          "payment_id": 1,
+          "payment_reference": "PAY-CAP-1",
+          "payout_reference": "wdr_9a23832a315c4610a6f79fe9324e443d:1",
+          "amount": "9000.00",
+          "gross_amount": "10000.00",
+          "platform_fee": "1000.00",
+          "released_at": "2026-11-17T13:14:46.418767Z",
+          "booking_reference": "BK-CAP-3",
+          "customer_name": "Placeholder Client",
+          "withdrawal_id": 1
+        }
+      ],
+      "total": 1,
+      "page": 1,
+      "page_size": 20,
+      "withdrawals": [
+        {
+          "id": 2,
+          "reference": "wdr_68affe6b99eb4894aeaabc638f86bbcd",
+          "amount": "18000.00",
+          "currency": "NGN",
+          "status": "failed",
+          "bank_code": "057",
+          "account_number_last4": "0000",
+          "account_name": "JANE PLACEHOLDER",
+          "created_at": "2026-11-17T13:14:46.497180Z",
+          "completed_at": "2026-11-17T13:14:46.526105Z"
+        },
+        {
+          "id": 1,
+          "reference": "wdr_9a23832a315c4610a6f79fe9324e443d",
+          "amount": "9000.00",
+          "currency": "NGN",
+          "status": "success",
+          "bank_code": "057",
+          "account_number_last4": "0000",
+          "account_name": "JANE PLACEHOLDER",
+          "created_at": "2026-11-17T13:14:46.350181Z",
+          "completed_at": "2026-11-17T13:14:46.418767Z"
+        }
+      ]
+    }
+  }
+}

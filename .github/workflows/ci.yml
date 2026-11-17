@@ -7,12 +7,51 @@ on:
     branches: [ main, develop ]
 
 jobs:
+  # Lint is its own job so a lint failure never hides the test results.
+  # NOTE: main currently has ~59 files that fail `black --check` and many flake8 hits;
+  # this job stays red until a repo-wide format PR lands. New files are kept clean.
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: latest
+        virtualenvs-create: true
+        virtualenvs-in-project: true
+
+    - name: Cache dependencies
+      uses: actions/cache@v4
+      with:
+        path: .venv
+        key: ${{ runner.os }}-poetry-${{ hashFiles('poetry.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-poetry-
+
+    - name: Install dependencies
+      run: poetry install
+
+    - name: Run linting
+      run: |
+        poetry run black --check app tests
+        poetry run isort --check-only app tests
+        poetry run flake8 app tests
+
+
   test:
     runs-on: ubuntu-latest
 
     services:
       postgres:
-        image: postgres:15
+        image: postgis/postgis:15-3.4
         env:
           POSTGRES_USER: test_user
           POSTGRES_PASSWORD: test_password
@@ -61,14 +100,27 @@ jobs:
     - name: Install dependencies
       run: poetry install
 
-    - name: Run linting
+    - name: Apply migrations (schema check)
+      # Proves the migration chain builds the real schema on PostGIS: one head,
+      # clean upgrade from an empty database.
+      env:
+        ENVIRONMENT: test
+        SERVER_HOST: http://localhost
+        DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_db
+        REDIS_URL: redis://localhost:6379/0
+        SECRET_KEY: test-secret-key-for-ci
+        FIRST_SUPERUSER_EMAIL: admin@test.com
+        FIRST_SUPERUSER_PASSWORD: testpassword
       run: |
-        poetry run black --check app tests
-        poetry run isort --check-only app tests
-        poetry run flake8 app tests
+        test "$(poetry run alembic heads | wc -l)" -eq 1
+        poetry run alembic upgrade head
 
     - name: Run tests
+      # tests/conftest.py also enables the postgis extension and creates the schema
+      # (create_all) when the database is empty, so pytest works with or without the step above.
       env:
+        ENVIRONMENT: test
+        SERVER_HOST: http://localhost
         DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_db
         REDIS_URL: redis://localhost:6379/0
         SECRET_KEY: test-secret-key-for-ci

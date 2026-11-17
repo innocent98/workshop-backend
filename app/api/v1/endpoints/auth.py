@@ -5,8 +5,6 @@ Implements all 13 authentication endpoints from API documentation.
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Request
 from sqlalchemy.orm import Session
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 import firebase_admin
 from firebase_admin import auth as firebase_auth, credentials
 
@@ -49,10 +47,10 @@ from app.core.token_blacklist import blacklist_token
 from app.db.models.user import User
 from app.db.models.service import UserService, Service
 from app.core.config import settings
+from app.core.rate_limit import limiter
 
 
 router = APIRouter()
-limiter = Limiter(key_func=get_remote_address)
 
 
 # ============================================================================

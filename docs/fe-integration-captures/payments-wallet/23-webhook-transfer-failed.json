@@ -1,0 +1,26 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/payments/webhook",
+    "headers": {
+      "x-paystack-signature": "<hmac-sha512(PAYSTACK_WEBHOOK_SECRET, raw body)>",
+      "content-type": "application/json"
+    },
+    "body": {
+      "event": "transfer.failed",
+      "data": {
+        "reference": "wdr_68affe6b99eb4894aeaabc638f86bbcd",
+        "transfer_code": "TRF_placeholder2",
+        "amount": 1800000,
+        "reason": "Recipient bank unavailable"
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "status": "success",
+      "message": "Transfer processed"
+    }
+  }
+}

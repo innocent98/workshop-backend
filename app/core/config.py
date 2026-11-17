@@ -79,6 +79,12 @@ class Settings(BaseSettings):
     COMPLETION_DISPUTE_WINDOW_HOURS: int = 24
     PLATFORM_COMMISSION_PERCENT: Decimal = Decimal("10.00")
 
+    # Artisan withdrawals
+    MIN_PAYOUT_NGN: Decimal = Decimal("5000.00")
+
+    # Rate limiting (falls back to REDIS_URL when unset)
+    RATE_LIMIT_STORAGE_URI: Optional[str] = None
+
     # Push notifications (Firebase Cloud Messaging)
     FCM_ENABLED: bool = True
     FCM_SERVICE_ACCOUNT_FILE: Optional[str] = "/app/app/service_account/workchop-b3069-firebase-adminsdk-fbsvc-75e0bff73a.json"

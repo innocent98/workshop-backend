@@ -2,19 +2,19 @@
 Wallet endpoints for artisan earnings and payout management.
 """
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, status, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_, or_
+from sqlalchemy import func, and_
 from decimal import Decimal
-from datetime import datetime
-import json
 
 from app.db.session import get_db
 from app.api.deps import get_current_user
+from app.core.config import settings
 from app.db.models.user import User, UserType
 from app.db.models.booking import Booking, BookingStatus
 from app.db.models.payment import Payment, PaymentStatus
 from app.db.models.service import Service
+from app.db.models.withdrawal import Withdrawal
 from app.schemas.wallet import (
     WalletBalanceResponse,
     EarningItemResponse,
@@ -28,6 +28,12 @@ from app.schemas.wallet import (
     RequestPayoutResponse,
 )
 from app.services.paystack import PaystackService, PaystackError
+from app.services.withdrawal_service import (
+    WithdrawalError,
+    available_balance,
+    pending_withdrawal_amount,
+    request_withdrawal,
+)
 
 
 router = APIRouter()
@@ -105,6 +111,18 @@ async def verify_bank_account(
     }
 
 
+def _require_artisan(user: User, detail: str) -> None:
+    if user.user_type != UserType.ARTISAN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+
+
+def _artisan_payments(db: Session, artisan_id):
+    """Base query: every payment belonging to this artisan's bookings."""
+    return db.query(Payment).join(Booking, Booking.id == Payment.booking_id).filter(
+        Booking.artisan_id == artisan_id
+    )
+
+
 @router.get("/balance", response_model=WalletBalanceResponse)
 async def get_wallet_balance(
     current_user: User = Depends(get_current_user),
@@ -113,86 +131,49 @@ async def get_wallet_balance(
     """
     Get wallet balance and earnings summary for artisan.
 
-    Only artisans can access wallet.
+    `pending_release` is the amount withdrawable right now (kept for app compatibility;
+    `available_balance` is the same number). Money already inside a processing
+    withdrawal is reported as `pending_withdrawal` and is NOT available.
     """
-    # Only artisans have wallets
-    if current_user.user_type != UserType.ARTISAN:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only artisans have wallet access"
-        )
+    _require_artisan(current_user, "Only artisans have wallet access")
+    artisan_id = current_user.id
 
-    # Get all bookings for this artisan
-    artisan_bookings = db.query(Booking).filter(
-        Booking.artisan_id == current_user.id
-    ).all()
+    total_earned = _artisan_payments(db, artisan_id).filter(
+        Payment.status == PaymentStatus.RELEASED
+    ).with_entities(func.sum(Payment.artisan_amount)).scalar() or Decimal(0)
 
-    booking_ids = [b.id for b in artisan_bookings]
+    available = available_balance(db, artisan_id)
+    pending_withdrawal = pending_withdrawal_amount(db, artisan_id)
 
-    # Get total earned (RELEASED payments)
-    total_earned = db.query(func.sum(Payment.artisan_amount)).filter(
-        and_(
-            Payment.booking_id.in_(booking_ids) if booking_ids else False,
-            Payment.status == PaymentStatus.RELEASED
-        )
-    ).scalar() or Decimal(0)
+    total_platform_fee = _artisan_payments(db, artisan_id).filter(
+        Payment.status.in_([PaymentStatus.SUCCESS, PaymentStatus.RELEASED]),
+    ).with_entities(func.sum(Payment.platform_fee)).scalar() or Decimal(0)
 
-    # Get pending release (SUCCESS payments eligible for payout)
-    # Eligibility matches request_payout rules:
-    # - booking completed
-    # - not disputed
-    # - client confirmed OR dispute window elapsed
-    pending_release = db.query(func.sum(Payment.artisan_amount)).filter(
-        and_(
-            Payment.booking_id.in_(booking_ids) if booking_ids else False,
-            Payment.status == PaymentStatus.SUCCESS,
-            Payment.booking.has(Booking.status == BookingStatus.COMPLETED),
-            Payment.booking.has(Booking.completion_disputed_at.is_(None)),
-            Payment.booking.has(
-                or_(
-                    Booking.completion_confirmed_by_client_at.is_not(None),
-                    and_(
-                        Booking.completion_confirmation_deadline_at.is_not(None),
-                        Booking.completion_confirmation_deadline_at <= func.now(),
-                    ),
-                )
-            ),
-        )
-    ).scalar() or Decimal(0)
-
-    total_platform_fee = db.query(func.sum(Payment.platform_fee)).filter(
-        and_(
-            Payment.booking_id.in_(booking_ids) if booking_ids else False,
-            Payment.status.in_([PaymentStatus.SUCCESS, PaymentStatus.RELEASED]),
-        )
-    ).scalar() or Decimal(0)
-
-    # Count completed jobs
     total_jobs_completed = db.query(func.count(Booking.id)).filter(
         and_(
-            Booking.artisan_id == current_user.id,
+            Booking.artisan_id == artisan_id,
             Booking.status == BookingStatus.COMPLETED
         )
     ).scalar() or 0
 
-    # Count paid jobs
     total_jobs_paid = db.query(func.count(Booking.id)).filter(
         and_(
-            Booking.artisan_id == current_user.id,
+            Booking.artisan_id == artisan_id,
             Booking.status.in_([BookingStatus.PAID, BookingStatus.IN_PROGRESS, BookingStatus.COMPLETED])
         )
     ).scalar() or 0
 
-    # Lifetime earnings (all time - same as total earned for now)
-    lifetime_earnings = total_earned
-
     return {
         "total_earned": total_earned,
-        "pending_release": pending_release,
+        "pending_release": available,
         "total_platform_fee": total_platform_fee,
         "total_jobs_completed": total_jobs_completed,
         "total_jobs_paid": total_jobs_paid,
-        "lifetime_earnings": lifetime_earnings
+        "lifetime_earnings": total_earned,
+        # additive fields
+        "available_balance": available,
+        "pending_withdrawal": pending_withdrawal,
+        "min_payout": settings.MIN_PAYOUT_NGN,
     }
 
 
@@ -207,28 +188,13 @@ async def get_earnings_history(
     """
     Get earnings history for artisan.
 
-    Shows all payments with booking details.
+    Shows all payments with booking details. `withdrawal_id` / `withdrawal_status`
+    (additive) tell the app which payments are inside a withdrawal.
     """
-    # Only artisans can access
-    if current_user.user_type != UserType.ARTISAN:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only artisans have earnings history"
-        )
+    _require_artisan(current_user, "Only artisans have earnings history")
 
-    # Get all bookings for this artisan
-    artisan_bookings = db.query(Booking).filter(
-        Booking.artisan_id == current_user.id
-    ).all()
+    query = _artisan_payments(db, current_user.id)
 
-    booking_ids = [b.id for b in artisan_bookings]
-
-    # Base query for payments
-    query = db.query(Payment).filter(
-        Payment.booking_id.in_(booking_ids) if booking_ids else False
-    )
-
-    # Apply status filter
     if status_filter:
         try:
             status_enum = PaymentStatus(status_filter)
@@ -239,13 +205,9 @@ async def get_earnings_history(
                 detail=f"Invalid status: {status_filter}"
             )
 
-    # Get total count
     total = query.count()
-
-    # Apply pagination
     payments = query.order_by(Payment.created_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
 
-    # Build response with booking details
     earnings = []
     total_amount = Decimal(0)
 
@@ -271,7 +233,9 @@ async def get_earnings_history(
             "job_date": booking.job_date,
             "paid_at": payment.paid_at,
             "released_at": payment.released_at,
-            "created_at": payment.created_at
+            "created_at": payment.created_at,
+            "withdrawal_id": payment.withdrawal_id,
+            "withdrawal_status": payment.withdrawal.status.value if payment.withdrawal else None,
         })
 
         if payment.status in [PaymentStatus.SUCCESS, PaymentStatus.RELEASED]:
@@ -299,39 +263,20 @@ async def get_payout_history(
     """
     Get payout history for artisan.
 
-    Shows all payments that have been released (paid out) to the artisan.
+    `payouts` keeps its original shape: one row per RELEASED payment (money that actually
+    reached the bank). `withdrawals` (additive) lists every withdrawal including
+    processing / failed / reversed ones, newest first.
     """
-    # Only artisans can access
-    if current_user.user_type != UserType.ARTISAN:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only artisans have payout history"
-        )
+    _require_artisan(current_user, "Only artisans have payout history")
 
-    # Get all bookings for this artisan
-    artisan_bookings = db.query(Booking).filter(
-        Booking.artisan_id == current_user.id
-    ).all()
-
-    booking_ids = [b.id for b in artisan_bookings]
-
-    # Query for RELEASED payments only
-    query = db.query(Payment).filter(
-        and_(
-            Payment.booking_id.in_(booking_ids) if booking_ids else False,
-            Payment.status == PaymentStatus.RELEASED
-        )
+    query = _artisan_payments(db, current_user.id).filter(
+        Payment.status == PaymentStatus.RELEASED
     )
 
-    # Get total count
     total = query.count()
-
-    # Apply pagination
     payments = query.order_by(Payment.released_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
 
-    # Build response with booking details
     payouts = []
-
     for payment in payments:
         booking = db.query(Booking).filter(Booking.id == payment.booking_id).first()
         if not booking:
@@ -348,14 +293,40 @@ async def get_payout_history(
             "platform_fee": payment.platform_fee,
             "released_at": payment.released_at,
             "booking_reference": booking.booking_reference,
-            "customer_name": customer.full_name if customer else "Unknown"
+            "customer_name": customer.full_name if customer else "Unknown",
+            "withdrawal_id": payment.withdrawal_id,
         })
+
+    withdrawals = (
+        db.query(Withdrawal)
+        .filter(Withdrawal.artisan_id == current_user.id)
+        .order_by(Withdrawal.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
 
     return {
         "payouts": payouts,
         "total": total,
         "page": page,
-        "page_size": page_size
+        "page_size": page_size,
+        "withdrawals": [_withdrawal_item(w) for w in withdrawals],
+    }
+
+
+def _withdrawal_item(w: Withdrawal) -> dict:
+    return {
+        "id": w.id,
+        "reference": w.reference,
+        "amount": w.amount,
+        "currency": w.currency,
+        "status": w.status.value,
+        "bank_code": w.bank_code,
+        "account_number_last4": w.account_number_last4,
+        "account_name": w.account_name,
+        "created_at": w.created_at,
+        "completed_at": w.completed_at,
     }
 
 
@@ -367,29 +338,17 @@ async def get_wallet_stats(
     """
     Get detailed wallet statistics for artisan.
 
-    Includes monthly earnings, average job value, etc.
+    Includes monthly earnings, average job value, etc. `available_balance` and
+    `pending_withdrawal` are additive.
     """
-    # Only artisans can access
-    if current_user.user_type != UserType.ARTISAN:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only artisans have wallet stats"
-        )
+    _require_artisan(current_user, "Only artisans have wallet stats")
 
-    # Get all bookings for this artisan
-    artisan_bookings = db.query(Booking).filter(
-        Booking.artisan_id == current_user.id
+    successful_payments = _artisan_payments(db, current_user.id).filter(
+        Payment.status.in_([PaymentStatus.SUCCESS, PaymentStatus.RELEASED])
     ).all()
 
-    booking_ids = [b.id for b in artisan_bookings]
-
-    # Get all successful payments
-    successful_payments = db.query(Payment).filter(
-        and_(
-            Payment.booking_id.in_(booking_ids) if booking_ids else False,
-            Payment.status.in_([PaymentStatus.SUCCESS, PaymentStatus.RELEASED])
-        )
-    ).all()
+    available = available_balance(db, current_user.id)
+    pending_withdrawal = pending_withdrawal_amount(db, current_user.id)
 
     if not successful_payments:
         return {
@@ -397,178 +356,87 @@ async def get_wallet_stats(
             "average_job_value": "0.00",
             "highest_earning": "0.00",
             "lowest_earning": "0.00",
-            "total_transactions": 0
+            "total_transactions": 0,
+            "available_balance": str(available),
+            "pending_withdrawal": str(pending_withdrawal),
         }
 
-    amounts = [float(p.artisan_amount) for p in successful_payments]
+    amounts = [p.artisan_amount for p in successful_payments]
+    total_amount = sum(amounts, Decimal(0))
 
     return {
-        "total_earnings": str(sum(amounts)),
-        "average_job_value": str(sum(amounts) / len(amounts)) if amounts else "0.00",
-        "highest_earning": str(max(amounts)) if amounts else "0.00",
-        "lowest_earning": str(min(amounts)) if amounts else "0.00",
-        "total_transactions": len(successful_payments)
+        "total_earnings": str(total_amount),
+        "average_job_value": str((total_amount / len(amounts)).quantize(Decimal("0.01"))),
+        "highest_earning": str(max(amounts)),
+        "lowest_earning": str(min(amounts)),
+        "total_transactions": len(successful_payments),
+        "available_balance": str(available),
+        "pending_withdrawal": str(pending_withdrawal),
     }
 
 
 @router.post("/payout/request", response_model=RequestPayoutResponse)
-async def request_payout(
+def request_payout(
     request: RequestPayoutRequest,
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
-    Request payout/withdrawal to bank account.
+    Request a withdrawal to a bank account.
 
-    Artisan can request to withdraw their available balance.
-    Validates minimum amount, available balance, and bank details.
+    Whole completed-job payments are picked oldest-first, up to the requested amount,
+    and sent as ONE Paystack transfer. The response `amount` is what is actually being
+    transferred (it can be lower than the requested amount). Send an `Idempotency-Key`
+    header to make double taps / retries safe: a repeat returns the original withdrawal.
     """
-    # Only artisans can request payouts
-    if current_user.user_type != UserType.ARTISAN:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only artisans can request payouts"
-        )
+    _require_artisan(current_user, "Only artisans can request payouts")
 
-    # Minimum payout amount (e.g., ₦5,000)
-    MINIMUM_PAYOUT = Decimal("5000.00")
-
-    if request.amount < MINIMUM_PAYOUT:
+    key = idempotency_key.strip() if idempotency_key else None
+    if key and len(key) > 100:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Minimum payout amount is ₦{MINIMUM_PAYOUT}"
-        )
-
-    # Get artisan's available balance (SUCCESS payments - paid by customer, pending release)
-    artisan_bookings = db.query(Booking).filter(
-        Booking.artisan_id == current_user.id
-    ).all()
-
-    booking_ids = [b.id for b in artisan_bookings]
-
-    # Calculate available balance from payments that are:
-    # - SUCCESS (paid by customer, not yet released),
-    # - booking is COMPLETED,
-    # - not disputed,
-    # - and either client-confirmed or dispute window has elapsed.
-    available_balance = db.query(func.sum(Payment.artisan_amount)).filter(
-        and_(
-            Payment.booking_id.in_(booking_ids) if booking_ids else False,
-            Payment.status == PaymentStatus.SUCCESS,
-            Payment.booking.has(Booking.status == BookingStatus.COMPLETED),
-            Payment.booking.has(Booking.completion_disputed_at.is_(None)),
-            Payment.booking.has(
-                or_(
-                    Booking.completion_confirmed_by_client_at.is_not(None),
-                    and_(
-                        Booking.completion_confirmation_deadline_at.is_not(None),
-                        Booking.completion_confirmation_deadline_at <= func.now(),
-                    ),
-                )
-            ),
-        )
-    ).scalar() or Decimal(0)
-
-    # Check if sufficient balance
-    if request.amount > available_balance:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Insufficient balance. Available: ₦{available_balance}, Requested: ₦{request.amount}"
+            detail="Idempotency-Key must be at most 100 characters"
         )
 
     try:
-        # Step 1: Verify bank account with Paystack
-        verification = PaystackService.verify_account_number(
+        result = request_withdrawal(
+            db,
+            artisan_id=current_user.id,
+            amount=request.amount,
             account_number=request.account_number,
-            bank_code=request.bank_code
+            bank_code=request.bank_code,
+            account_name=request.account_name,
+            idempotency_key=key or None,
         )
+    except WithdrawalError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
 
-        verified_account_name = verification.get('account_name', '')
-
-        # Optional: Validate account name matches (fuzzy match)
-        # For now, we'll just use the verified name
-
-        # Step 2: Create transfer recipient
-        recipient = PaystackService.create_transfer_recipient(
-            name=verified_account_name or request.account_name,
-            account_number=request.account_number,
-            bank_code=request.bank_code
-        )
-
-        recipient_code = recipient.get('recipient_code')
-
-        # Step 3: Get payments to release (up to requested amount)
-        payments_to_release = db.query(Payment).filter(
-            and_(
-                Payment.booking_id.in_(booking_ids) if booking_ids else False,
-                Payment.status == PaymentStatus.SUCCESS,
-                Payment.booking.has(Booking.status == BookingStatus.COMPLETED),
-                Payment.booking.has(Booking.completion_disputed_at.is_(None)),
-                Payment.booking.has(
-                    or_(
-                        Booking.completion_confirmed_by_client_at.is_not(None),
-                        and_(
-                            Booking.completion_confirmation_deadline_at.is_not(None),
-                            Booking.completion_confirmation_deadline_at <= func.now(),
-                        ),
-                    )
-                ),
+    withdrawal = result.withdrawal
+    amount_text = f"₦{withdrawal.amount:,.2f}"
+    if withdrawal.status.value == "processing":
+        if withdrawal.transfer_code and not withdrawal.failure_reason:
+            message = f"Withdrawal of {amount_text} initiated successfully"
+        else:
+            # The transfer call timed out / errored or is awaiting approval: we do not yet know
+            # that it went through, so do not claim it did.
+            message = (
+                f"Your withdrawal of {amount_text} is being processed. We are confirming it "
+                "with the bank and will notify you when it completes."
             )
-        ).order_by(Payment.paid_at.asc()).all()
-
-        # Release payments until we reach the requested amount
-        total_released = Decimal(0)
-        released_payment_ids = []
-
-        for payment in payments_to_release:
-            if total_released >= request.amount:
-                break
-
-            amount_to_release = min(payment.artisan_amount, request.amount - total_released)
-
-            # For simplicity, we'll release full payments
-            # In production, you might want to support partial releases
-            if payment.artisan_amount <= (request.amount - total_released):
-                # Generate payout reference
-                payout_reference = f"PAYOUT-{payment.payment_reference}"
-
-                # Initiate transfer
-                transfer = PaystackService.initiate_transfer(
-                    recipient_code=recipient_code,
-                    amount=payment.artisan_amount,
-                    reason=f"Payout for booking {payment.booking.booking_reference}",
-                    reference=payout_reference
-                )
-
-                # Update payment status
-                payment.status = PaymentStatus.RELEASED
-                payment.released_at = func.now()
-                payment.payout_reference = payout_reference
-                payment.payout_response = json.dumps(transfer)
-
-                total_released += payment.artisan_amount
-                released_payment_ids.append(payment.id)
-
-        db.commit()
-
-        return {
-            "success": True,
-            "message": f"Payout of ₦{total_released} initiated successfully",
-            "payout_reference": f"BATCH-{datetime.now().strftime('%Y%m%d%H%M%S')}",
-            "amount": total_released,
-            "account_number": request.account_number,
-            "bank_code": request.bank_code,
-            "status": "processing"
-        }
-
-    except PaystackError as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Payout request failed: {str(e)}"
-        )
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"An error occurred: {str(e)}"
-        )
+    else:
+        message = f"Withdrawal of {amount_text} is {withdrawal.status.value}"
+    return {
+        "success": withdrawal.status.value in ("processing", "success"),
+        "message": message,
+        "payout_reference": withdrawal.reference,
+        "amount": withdrawal.amount,
+        "account_number": request.account_number,
+        "bank_code": withdrawal.bank_code,
+        "status": withdrawal.status.value,
+        # additive fields
+        "withdrawal_id": withdrawal.id,
+        "requested_amount": withdrawal.requested_amount or request.amount,
+        "payments_count": result.payments_count,
+        "idempotent_replay": result.replay,
+    }

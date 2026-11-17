@@ -4,12 +4,12 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi import Request, Response
 import time
-from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 from app.core.config import settings
 from app.core.logger import log
+from app.core.rate_limit import limiter
 from app.api.v1.api import api_router
 
 
@@ -82,9 +82,6 @@ def custom_rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded)
     return response
 
 
-# Initialize rate limiter
-limiter = Limiter(key_func=get_remote_address)
-
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
@@ -93,7 +90,7 @@ app = FastAPI(
     redoc_url=f"{settings.API_V1_STR}/redoc",
 )
 
-# Add rate limiter state and custom error handler
+# Shared (Redis-backed) rate limiter state + custom error handler
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, custom_rate_limit_exceeded_handler)
 

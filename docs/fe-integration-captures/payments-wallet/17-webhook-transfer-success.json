@@ -1,0 +1,26 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/payments/webhook",
+    "headers": {
+      "x-paystack-signature": "<hmac-sha512(PAYSTACK_WEBHOOK_SECRET, raw body)>",
+      "content-type": "application/json"
+    },
+    "body": {
+      "event": "transfer.success",
+      "data": {
+        "reference": "wdr_9a23832a315c4610a6f79fe9324e443d",
+        "transfer_code": "TRF_placeholder1",
+        "amount": 900000,
+        "status": "success"
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "status": "success",
+      "message": "Transfer processed"
+    }
+  }
+}
