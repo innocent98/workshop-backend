@@ -395,6 +395,41 @@ def main():
         {"note": "does not exist"},
     )
 
+    # --------------------------------------------- a hidden review is invisible to the artisan
+    send(
+        "POST",
+        "hidden-admin-hides-review",
+        f"/admin/reviews/{r3['id']}/flag",
+        h["admin"],
+        {"note": "Hiding to check what the artisan can see."},
+    )
+    get(
+        "hidden-artisan-reads-booking-review",
+        f"/reviews/booking/{ids['c3']}",
+        h["artisan"],
+        note="same 404 as a booking with no review",
+    )
+    send(
+        "PATCH",
+        "hidden-artisan-respond",
+        f"/reviews/{r3['id']}/respond",
+        h["artisan"],
+        {"artisan_response": "I did the job properly and on time."},
+        "refused, nothing is sent to the customer",
+    )
+    get(
+        "hidden-author-reads-own",
+        f"/reviews/booking/{ids['c3']}",
+        h["cust3"],
+        note="the author still sees it",
+    )
+    get(
+        "hidden-artisan-reads-visible-booking-review",
+        f"/reviews/booking/{ids['c1']}",
+        h["artisan"],
+        note="a visible review is readable by the artisan",
+    )
+
     db = SessionLocal()
     state = {
         "reviews": [

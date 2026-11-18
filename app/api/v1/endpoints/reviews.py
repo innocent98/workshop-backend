@@ -228,7 +228,9 @@ async def get_booking_review(
 
     # Get review
     review = db.query(Review).filter(Review.booking_id == booking_id).first()
-    if not review:
+    # A hidden review is visible to its author only: the artisan gets the same 404 as for a
+    # booking that has no review, so a flag cannot be probed for.
+    if not review or (review.is_flagged and review.customer_id != current_user.id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Review not found for this booking"
         )
@@ -341,9 +343,10 @@ async def respond_to_review(
             status_code=status.HTTP_403_FORBIDDEN, detail="Only artisans can respond to reviews"
         )
 
-    # Get review
+    # Get review. A hidden (flagged) review does not exist as far as the artisan is concerned:
+    # replying would notify the customer and confirm the review is there.
     review = db.query(Review).filter(Review.id == review_id).first()
-    if not review:
+    if not review or (review.is_flagged and review.artisan_id == current_user.id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Review not found")
 
     # Check if artisan owns this review

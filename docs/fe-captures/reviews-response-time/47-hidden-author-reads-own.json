@@ -1,0 +1,25 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/reviews/booking/6",
+    "body": null
+  },
+  "status": 200,
+  "response": {
+    "id": 3,
+    "booking_id": 6,
+    "customer_id": "6e254903-d37c-4255-bb49-4313a27f9d16",
+    "artisan_id": "df631428-50f0-42d4-a868-59aaffb7a300",
+    "rating": 3.0,
+    "review_text": "Decent job, a bit slow but the sink is fixed.",
+    "is_anonymous": false,
+    "is_flagged": true,
+    "artisan_response": null,
+    "artisan_responded_at": null,
+    "created_at": "2026-11-18T22:07:26.171264Z",
+    "updated_at": "2026-11-18T22:08:23.792288Z",
+    "customer_name": "Customer Three",
+    "artisan_name": "Demo Artisan"
+  },
+  "note": "the author still sees it"
+}

@@ -815,4 +815,16 @@ def admin_unflag_review(db: Session, admin: User, review_id: int, note: str) -> 
     )
     db.commit()
     db.refresh(review)
+    if was_flagged:
+        # The artisan was never told about this review while it was hidden: announce it now.
+        notify_user(
+            review.artisan_id,
+            "New review",
+            f"You received a {review.rating:g}-star review.",
+            {
+                "booking_id": str(review.booking_id),
+                "review_id": str(review.id),
+                "event": "review_received",
+            },
+        )
     return review_item(review)

@@ -50,7 +50,7 @@ def record_acceptance(db: Session, booking: Booking) -> Optional[int]:
     profile = (
         db.query(ArtisanProfile)
         .filter(ArtisanProfile.user_id == booking.artisan_id)
-        .with_for_update()
+        .with_for_update(key_share=True)  # FOR NO KEY UPDATE: serialises recomputes, blocks less
         .first()
     )
     if profile is None:

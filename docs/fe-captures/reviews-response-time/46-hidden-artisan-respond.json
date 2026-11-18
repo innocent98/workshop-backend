@@ -1,0 +1,14 @@
+{
+  "request": {
+    "method": "PATCH",
+    "path": "/reviews/3/respond",
+    "body": {
+      "artisan_response": "I did the job properly and on time."
+    }
+  },
+  "status": 404,
+  "response": {
+    "detail": "Review not found"
+  },
+  "note": "refused, nothing is sent to the customer"
+}

@@ -415,3 +415,94 @@ def test_flag_then_unflag_roundtrip_leaves_rating_unchanged(client, db, service,
     after = profile(db, artisan)
     assert (after.total_ratings, after.average_rating) == snapshot
     assert a != b
+
+
+# ------------------------------------- a hidden review must not leak to the artisan
+
+
+def test_artisan_cannot_see_a_hidden_review_by_booking(client, db, service, artisan):
+    r, customer, booking = post_review(client, db, service, artisan, 1.0, ABUSIVE)
+    assert r.status_code == 201
+    hidden = client.get(f"{REVIEWS}/booking/{booking.id}", headers=auth(artisan))
+    assert hidden.status_code == 404
+    assert hidden.json()["detail"] == "Review not found for this booking"
+    # identical to a booking with no review at all, so the flag cannot be probed
+    other_booking = completed_booking(db, service, customer, artisan)
+    none = client.get(f"{REVIEWS}/booking/{other_booking.id}", headers=auth(artisan))
+    assert (none.status_code, none.json()) == (hidden.status_code, hidden.json())
+    # the author still sees it
+    assert client.get(f"{REVIEWS}/booking/{booking.id}", headers=auth(customer)).status_code == 200
+
+
+def test_artisan_sees_a_visible_review_by_booking(client, db, service, artisan):
+    _, _, booking = post_review(client, db, service, artisan, 4.0, CLEAN)
+    assert client.get(f"{REVIEWS}/booking/{booking.id}", headers=auth(artisan)).status_code == 200
+
+
+def test_artisan_cannot_respond_to_a_hidden_review(client, db, service, artisan, notifications):
+    r, customer, _ = post_review(client, db, service, artisan, 1.0, ABUSIVE)
+    rid = r.json()["id"]
+    reply = client.patch(
+        f"{REVIEWS}/{rid}/respond",
+        json={"artisan_response": "I did the job properly and on time."},
+        headers=auth(artisan),
+    )
+    assert reply.status_code == 404
+    db.expire_all()
+    assert db.get(Review, rid).artisan_response is None
+    assert notifications == []  # the customer was not pinged, nothing confirms the review exists
+
+
+def test_artisan_can_respond_to_a_visible_review(client, db, service, artisan):
+    rid, _ = make_review(client, db, service, artisan)
+    reply = client.patch(
+        f"{REVIEWS}/{rid}/respond",
+        json={"artisan_response": "Thank you, it was a pleasure."},
+        headers=auth(artisan),
+    )
+    assert reply.status_code == 200
+
+
+def test_artisan_can_respond_once_an_admin_restores_the_review(client, db, service, artisan, admin):
+    r, _, _ = post_review(client, db, service, artisan, 3.0, ABUSIVE)
+    rid = r.json()["id"]
+    client.post(f"{ADMIN}/{rid}/unflag", json={"note": "slang, restoring"}, headers=auth(admin))
+    reply = client.patch(
+        f"{REVIEWS}/{rid}/respond",
+        json={"artisan_response": "Thank you for the feedback."},
+        headers=auth(artisan),
+    )
+    assert reply.status_code == 200
+
+
+# -------------------------------------- restoring a review announces it to the artisan
+
+
+def test_restoring_a_hidden_review_sends_the_new_review_notification(
+    client, db, service, artisan, admin, notifications
+):
+    r, _, booking = post_review(client, db, service, artisan, 2.5, ABUSIVE)
+    rid = r.json()["id"]
+    assert notifications == []
+    client.post(f"{ADMIN}/{rid}/unflag", json={"note": "not abuse, restoring"}, headers=auth(admin))
+    assert len(notifications) == 1
+    n = notifications[0]
+    assert n["user_id"] == str(artisan.id)
+    assert n["title"] == "New review"
+    assert n["body"] == "You received a 2.5-star review."
+    assert n["data"] == {
+        "booking_id": str(booking.id),
+        "review_id": str(rid),
+        "event": "review_received",
+    }
+
+
+def test_dismissing_reports_or_hiding_does_not_send_a_new_review_notification(
+    client, db, service, artisan, admin, notifications
+):
+    rid, _ = make_review(client, db, service, artisan)
+    notifications.clear()  # drop the notification for the visible review itself
+    client.post(f"{REVIEWS}/{rid}/report", json={"reason": "spam"}, headers=auth(artisan))
+    client.post(f"{ADMIN}/{rid}/unflag", json={"note": "dismissing report"}, headers=auth(admin))
+    client.post(f"{ADMIN}/{rid}/flag", json={"note": "hiding it now"}, headers=auth(admin))
+    assert notifications == []

@@ -76,8 +76,8 @@ Response, status 200 (trimmed to the fields relevant here, full booking body is 
   "id": 1,
   "status": "accepted",
   "agreed_amount": "8000.00",
-  "created_at": "2026-11-18T21:27:51.293470Z",
-  "accepted_at": "2026-11-18T21:52:51.392218Z"
+  "created_at": "2026-11-18T21:41:09.145258Z",
+  "accepted_at": "2026-11-18T22:06:09.380679Z"
 }
 ```
 
@@ -123,7 +123,7 @@ Public profile of the artisan above (capture 08, status 200):
 
 ```json
 {
-  "id": "728142dd-6897-4c3e-be4b-0bebc567b451",
+  "id": "df631428-50f0-42d4-a868-59aaffb7a300",
   "full_name": "Demo Artisan",
   "profile_picture_url": null,
   "bio": null,
@@ -147,7 +147,7 @@ Public profile of an artisan who has never accepted a booking (capture 09). The 
 
 ```json
 {
-  "id": "cdb79e17-9ea6-4f8a-8a25-325f9c19fa70",
+  "id": "1d7ba0d5-51e1-4b94-be57-f580ea2b544d",
   "full_name": "Newcomer Artisan",
   "profile_picture_url": null,
   "bio": null,
@@ -175,7 +175,7 @@ Public profile of an artisan who has never accepted a booking (capture 09). The 
 {
   "results": [
     {
-      "id": "728142dd-6897-4c3e-be4b-0bebc567b451",
+      "id": "df631428-50f0-42d4-a868-59aaffb7a300",
       "full_name": "Demo Artisan",
       "profile_picture": null,
       "location_address": "12 Example Street, Lagos",
@@ -197,7 +197,7 @@ Public profile of an artisan who has never accepted a booking (capture 09). The 
       "portfolio_sample": null
     },
     {
-      "id": "cdb79e17-9ea6-4f8a-8a25-325f9c19fa70",
+      "id": "1d7ba0d5-51e1-4b94-be57-f580ea2b544d",
       "full_name": "Newcomer Artisan",
       "profile_picture": null,
       "location_address": "12 Example Street, Lagos",
@@ -275,16 +275,16 @@ Status 201:
 {
   "id": 1,
   "booking_id": 4,
-  "customer_id": "a5bee112-b479-4c7e-ae45-ec591d61d7b1",
-  "artisan_id": "728142dd-6897-4c3e-be4b-0bebc567b451",
+  "customer_id": "e518bc7d-899e-4aae-9518-4e7bc32a80dc",
+  "artisan_id": "df631428-50f0-42d4-a868-59aaffb7a300",
   "rating": 5.0,
   "review_text": "Excellent work, finished on time and very professional.",
   "is_anonymous": false,
   "is_flagged": false,
   "artisan_response": null,
   "artisan_responded_at": null,
-  "created_at": "2026-11-18T21:53:49.177255Z",
-  "updated_at": "2026-11-18T21:53:49.177255Z",
+  "created_at": "2026-11-18T22:07:07.005315Z",
+  "updated_at": "2026-11-18T22:07:07.005315Z",
   "customer_name": "Customer One",
   "artisan_name": "Demo Artisan"
 }
@@ -310,16 +310,16 @@ Status 201:
 {
   "id": 2,
   "booking_id": 5,
-  "customer_id": "29dfe00c-ee46-4f82-b08b-8ad8c45a51af",
-  "artisan_id": "728142dd-6897-4c3e-be4b-0bebc567b451",
+  "customer_id": "24c879e6-63d4-4fa6-b009-afe78335a4ae",
+  "artisan_id": "df631428-50f0-42d4-a868-59aaffb7a300",
   "rating": 1.0,
   "review_text": "This man na mumu, total idiot. Never again.",
   "is_anonymous": false,
   "is_flagged": true,
   "artisan_response": null,
   "artisan_responded_at": null,
-  "created_at": "2026-11-18T21:54:08.348810Z",
-  "updated_at": "2026-11-18T21:54:08.348810Z",
+  "created_at": "2026-11-18T22:07:26.134379Z",
+  "updated_at": "2026-11-18T22:07:26.134379Z",
   "customer_name": "Customer Two",
   "artisan_name": "Demo Artisan"
 }
@@ -331,9 +331,14 @@ Status 201:
 
 | Who | Sees the hidden review? | How |
 |---|---|---|
-| The customer who wrote it | yes | `GET /reviews/booking/{booking_id}` returns it, `is_flagged: true` (capture 15) |
-| The artisan | yes, privately | same endpoint (they are a party to the booking). They are **not** push-notified about a hidden review. |
+| The customer who wrote it | yes | `GET /reviews/booking/{booking_id}` returns it, `is_flagged: true` (captures 15, 47) |
+| The artisan | **no** | `GET /reviews/booking/{booking_id}` answers **404** `{"detail": "Review not found for this booking"}` (capture 45), exactly like a booking with no review. `PATCH /reviews/{id}/respond` answers 404 `{"detail": "Review not found"}` (capture 46) and nothing is sent to the customer. They get no push when the review is hidden. |
 | Everyone else | no | absent from `GET /reviews/artisan/{artisan_id}` and excluded from every count (captures 16, 17) |
+
+So an artisan's app must treat a 404 on the booking-review call as "no review (yet)". Capture 48
+shows the same call returning 200 for a visible review. If an admin later **restores** a hidden review,
+the artisan then receives the normal "New review" push (`event: review_received`) and can read and
+reply to it.
 
 Capture 15, status 200 (customer reading their own hidden review):
 
@@ -341,16 +346,16 @@ Capture 15, status 200 (customer reading their own hidden review):
 {
   "id": 2,
   "booking_id": 5,
-  "customer_id": "29dfe00c-ee46-4f82-b08b-8ad8c45a51af",
-  "artisan_id": "728142dd-6897-4c3e-be4b-0bebc567b451",
+  "customer_id": "24c879e6-63d4-4fa6-b009-afe78335a4ae",
+  "artisan_id": "df631428-50f0-42d4-a868-59aaffb7a300",
   "rating": 1.0,
   "review_text": "This man na mumu, total idiot. Never again.",
   "is_anonymous": false,
   "is_flagged": true,
   "artisan_response": null,
   "artisan_responded_at": null,
-  "created_at": "2026-11-18T21:54:08.348810Z",
-  "updated_at": "2026-11-18T21:54:08.348810Z",
+  "created_at": "2026-11-18T22:07:26.134379Z",
+  "updated_at": "2026-11-18T22:07:26.134379Z",
   "customer_name": "Customer Two",
   "artisan_name": "Demo Artisan"
 }
@@ -367,32 +372,32 @@ Three reviews exist for this artisan (5★ clean, 1★ hidden, 3★ clean). `GET
     {
       "id": 3,
       "booking_id": 6,
-      "customer_id": "5f07782a-7da9-4ea9-a502-738752378995",
-      "artisan_id": "728142dd-6897-4c3e-be4b-0bebc567b451",
+      "customer_id": "6e254903-d37c-4255-bb49-4313a27f9d16",
+      "artisan_id": "df631428-50f0-42d4-a868-59aaffb7a300",
       "rating": 3.0,
       "review_text": "Decent job, a bit slow but the sink is fixed.",
       "is_anonymous": false,
       "is_flagged": false,
       "artisan_response": null,
       "artisan_responded_at": null,
-      "created_at": "2026-11-18T21:54:08.401510Z",
-      "updated_at": "2026-11-18T21:54:08.401510Z",
+      "created_at": "2026-11-18T22:07:26.171264Z",
+      "updated_at": "2026-11-18T22:07:26.171264Z",
       "customer_name": "Customer Three",
       "artisan_name": "Demo Artisan"
     },
     {
       "id": 1,
       "booking_id": 4,
-      "customer_id": "a5bee112-b479-4c7e-ae45-ec591d61d7b1",
-      "artisan_id": "728142dd-6897-4c3e-be4b-0bebc567b451",
+      "customer_id": "e518bc7d-899e-4aae-9518-4e7bc32a80dc",
+      "artisan_id": "df631428-50f0-42d4-a868-59aaffb7a300",
       "rating": 5.0,
       "review_text": "Excellent work, finished on time and very professional.",
       "is_anonymous": false,
       "is_flagged": false,
       "artisan_response": null,
       "artisan_responded_at": null,
-      "created_at": "2026-11-18T21:53:49.177255Z",
-      "updated_at": "2026-11-18T21:53:49.177255Z",
+      "created_at": "2026-11-18T22:07:07.005315Z",
+      "updated_at": "2026-11-18T22:07:07.005315Z",
       "customer_name": "Customer One",
       "artisan_name": "Demo Artisan"
     }
@@ -413,7 +418,7 @@ Three reviews exist for this artisan (5★ clean, 1★ hidden, 3★ clean). `GET
 
 ```json
 {
-  "artisan_id": "728142dd-6897-4c3e-be4b-0bebc567b451",
+  "artisan_id": "df631428-50f0-42d4-a868-59aaffb7a300",
   "total_reviews": 2,
   "average_rating": 4.0,
   "rating_distribution": {
@@ -446,6 +451,7 @@ them (capture 18, `average_rating` 4.0, `total_ratings` 2):
   Do not tell the reviewer they were flagged or name the filter (that teaches people to dodge it).
   If you want a hint at all, a neutral "Your review is being checked and may take a little longer to
   appear" on the customer's own copy is acceptable.
+- The artisan's screen for a booking's review must tolerate the 404 above (hidden or missing review look the same).
 - Do not read `is_flagged` on public lists to decide anything: public endpoints only ever return `false`.
 - Ratings can change after the fact: an admin can hide or restore a review later, which moves the
   artisan's average and count. Do not cache them for long.
@@ -563,16 +569,16 @@ Default queue (capture 30, status 200):
       "rating": 3.0,
       "review_text": "Decent job, a bit slow but the sink is fixed.",
       "is_anonymous": false,
-      "customer_id": "5f07782a-7da9-4ea9-a502-738752378995",
+      "customer_id": "6e254903-d37c-4255-bb49-4313a27f9d16",
       "customer_name": "Customer Three",
-      "artisan_id": "728142dd-6897-4c3e-be4b-0bebc567b451",
+      "artisan_id": "df631428-50f0-42d4-a868-59aaffb7a300",
       "artisan_name": "Demo Artisan",
       "is_flagged": false,
       "flag_source": null,
       "flag_reason": null,
       "flagged_at": null,
       "open_report_count": 1,
-      "created_at": "2026-11-18T21:54:08.401510Z"
+      "created_at": "2026-11-18T22:07:26.171264Z"
     },
     {
       "id": 2,
@@ -580,16 +586,16 @@ Default queue (capture 30, status 200):
       "rating": 1.0,
       "review_text": "This man na mumu, total idiot. Never again.",
       "is_anonymous": false,
-      "customer_id": "29dfe00c-ee46-4f82-b08b-8ad8c45a51af",
+      "customer_id": "24c879e6-63d4-4fa6-b009-afe78335a4ae",
       "customer_name": "Customer Two",
-      "artisan_id": "728142dd-6897-4c3e-be4b-0bebc567b451",
+      "artisan_id": "df631428-50f0-42d4-a868-59aaffb7a300",
       "artisan_name": "Demo Artisan",
       "is_flagged": true,
       "flag_source": "auto",
       "flag_reason": "Automatic filter: abusive language (en, pcm)",
-      "flagged_at": "2026-11-18T21:54:08.358286Z",
+      "flagged_at": "2026-11-18T22:07:26.142629Z",
       "open_report_count": 1,
-      "created_at": "2026-11-18T21:54:08.348810Z"
+      "created_at": "2026-11-18T22:07:26.134379Z"
     },
     {
       "id": 1,
@@ -597,16 +603,16 @@ Default queue (capture 30, status 200):
       "rating": 5.0,
       "review_text": "Excellent work, finished on time and very professional.",
       "is_anonymous": false,
-      "customer_id": "a5bee112-b479-4c7e-ae45-ec591d61d7b1",
+      "customer_id": "e518bc7d-899e-4aae-9518-4e7bc32a80dc",
       "customer_name": "Customer One",
-      "artisan_id": "728142dd-6897-4c3e-be4b-0bebc567b451",
+      "artisan_id": "df631428-50f0-42d4-a868-59aaffb7a300",
       "artisan_name": "Demo Artisan",
       "is_flagged": false,
       "flag_source": null,
       "flag_reason": null,
       "flagged_at": null,
       "open_report_count": 1,
-      "created_at": "2026-11-18T21:53:49.177255Z"
+      "created_at": "2026-11-18T22:07:07.005315Z"
     }
   ],
   "total": 3,
@@ -633,24 +639,24 @@ Capture 33, status 200. Note `reports` exists **only on this endpoint**, not in 
   "rating": 5.0,
   "review_text": "Excellent work, finished on time and very professional.",
   "is_anonymous": false,
-  "customer_id": "a5bee112-b479-4c7e-ae45-ec591d61d7b1",
+  "customer_id": "e518bc7d-899e-4aae-9518-4e7bc32a80dc",
   "customer_name": "Customer One",
-  "artisan_id": "728142dd-6897-4c3e-be4b-0bebc567b451",
+  "artisan_id": "df631428-50f0-42d4-a868-59aaffb7a300",
   "artisan_name": "Demo Artisan",
   "is_flagged": false,
   "flag_source": null,
   "flag_reason": null,
   "flagged_at": null,
   "open_report_count": 1,
-  "created_at": "2026-11-18T21:53:49.177255Z",
+  "created_at": "2026-11-18T22:07:07.005315Z",
   "reports": [
     {
       "id": 1,
-      "reporter_id": "badeb5e2-a6e7-4f7c-84b7-d91a00d07198",
+      "reporter_id": "f1d46257-ef48-4b0b-b000-ce6b32ea1657",
       "reporter_name": "Other Customer",
       "reason": "fake",
       "details": "I do not know this customer.",
-      "created_at": "2026-11-18T21:54:27.624705Z",
+      "created_at": "2026-11-18T22:07:45.335404Z",
       "resolved_at": null
     }
   ]
@@ -699,16 +705,16 @@ Status 200:
   "rating": 5.0,
   "review_text": "Excellent work, finished on time and very professional.",
   "is_anonymous": false,
-  "customer_id": "a5bee112-b479-4c7e-ae45-ec591d61d7b1",
+  "customer_id": "e518bc7d-899e-4aae-9518-4e7bc32a80dc",
   "customer_name": "Customer One",
-  "artisan_id": "728142dd-6897-4c3e-be4b-0bebc567b451",
+  "artisan_id": "df631428-50f0-42d4-a868-59aaffb7a300",
   "artisan_name": "Demo Artisan",
   "is_flagged": true,
   "flag_source": "admin",
   "flag_reason": "Reporter is right: this person never used the service.",
-  "flagged_at": "2026-11-18T21:54:27.922739Z",
+  "flagged_at": "2026-11-18T22:07:45.515833Z",
   "open_report_count": 0,
-  "created_at": "2026-11-18T21:53:49.177255Z"
+  "created_at": "2026-11-18T22:07:07.005315Z"
 }
 ```
 
@@ -730,16 +736,16 @@ reports on a review that was never hidden. Capture 38 (restore a review the admi
   "rating": 5.0,
   "review_text": "Excellent work, finished on time and very professional.",
   "is_anonymous": false,
-  "customer_id": "a5bee112-b479-4c7e-ae45-ec591d61d7b1",
+  "customer_id": "e518bc7d-899e-4aae-9518-4e7bc32a80dc",
   "customer_name": "Customer One",
-  "artisan_id": "728142dd-6897-4c3e-be4b-0bebc567b451",
+  "artisan_id": "df631428-50f0-42d4-a868-59aaffb7a300",
   "artisan_name": "Demo Artisan",
   "is_flagged": false,
   "flag_source": null,
   "flag_reason": null,
   "flagged_at": null,
   "open_report_count": 0,
-  "created_at": "2026-11-18T21:53:49.177255Z"
+  "created_at": "2026-11-18T22:07:07.005315Z"
 }
 ```
 
@@ -751,7 +757,7 @@ Nothing to do (not hidden, no open reports): capture 42, status 409: `{"detail":
 
 Unknown review, on either endpoint (capture 43, status 404): `{"detail": {"code": "review_not_found", "message": "Review not found"}}`.
 
-Every flag/unflag writes an `admin_audit_logs` row; the end state of the walk is in capture 44
+Every flag/unflag writes an `admin_audit_logs` row; the end state of the walk is in capture 49
 (reviews, reports and audit log as stored).
 
 ### UX instructions (admin)
@@ -788,11 +794,12 @@ reports closed.
 | Backfill of existing artisans | verified on a scratch DB with seeded history (not part of the HTTP walk; see SOP) |
 | Clean review public and counted | verified live (12, 16–18) |
 | Abusive review: 201 to reviewer, hidden, excluded from counts, visible to author | verified live (13, 15–18) |
-| Artisan not notified about a hidden review | covered by automated test only, NOT VERIFIED LIVE (push is disabled in the capture) |
+| Artisan gets 404 on the booking-review read and on respond for a hidden review; author still reads it; visible review readable by the artisan | verified live (45–48) |
+| Artisan not pushed about a hidden review; artisan pushed "New review" when an admin restores it | covered by automated tests only, NOT VERIFIED LIVE (push is disabled in the capture) |
 | Report: success, duplicate, own review, 404, invalid reason, per-user cap | verified live (20–26) |
 | Report by the reviewed artisan | verified live (27) |
 | Report without a token | verified live (19) |
 | Per-IP report limit 429 body | NOT VERIFIED LIVE (automated test only) |
-| Admin queue (all three views), detail, flag, unflag, restore of auto-flagged, error cases | verified live (28–43) |
+| Admin queue (all three views), detail, flag, unflag, restore of auto-flagged, error cases | verified live (28–44) |
 | Rating recalculation after flag / unflag | verified live (36, 37, 39, 41) |
-| Audit log rows for flag / unflag | verified live (44) |
+| Audit log rows for flag / unflag | verified live (49) |

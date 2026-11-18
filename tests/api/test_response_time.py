@@ -255,3 +255,55 @@ def test_value_is_exposed_unchanged_on_the_artisan_stats_endpoint(db, service, c
     stored = _profile(db, artisan).response_time_avg_minutes
     me = client.get("/api/v1/profiles/artisans/me/stats", headers=auth(artisan))
     assert me.json()["response_time_avg_minutes"] == stored
+
+
+# --------------------------------------- the stat must never put the acceptance at risk
+
+
+def test_accept_survives_the_stat_update_raising(db, service, client, monkeypatch):
+    customer, artisan = _people(db)
+    b = _booking(
+        db, service, customer, artisan, status=BookingStatus.PENDING, requested_minutes_ago=30
+    )
+
+    def boom(*a, **k):
+        raise RuntimeError("stat exploded")
+
+    monkeypatch.setattr(bookings_endpoints, "record_acceptance", boom)
+    r = accept(client, artisan, b)
+    assert r.status_code == 200
+    assert r.json()["status"] == "accepted"
+    db.expire_all()
+    saved = db.get(Booking, b.id)
+    assert saved.status == BookingStatus.ACCEPTED and saved.accepted_at is not None
+    assert _profile(db, artisan).response_time_avg_minutes is None  # stat skipped, not wrong
+
+
+def test_accept_survives_a_database_error_inside_the_stat_update(db, service, client, monkeypatch):
+    """A real DB error aborts the transaction unless it is contained in the savepoint."""
+    from sqlalchemy import text
+
+    customer, artisan = _people(db)
+    first = _booking(
+        db, service, customer, artisan, status=BookingStatus.PENDING, requested_minutes_ago=30
+    )
+
+    def db_error(session, booking):
+        session.execute(text("SELECT 1/0"))
+
+    monkeypatch.setattr(bookings_endpoints, "record_acceptance", db_error)
+    r = accept(client, artisan, first)
+    assert r.status_code == 200
+    db.expire_all()
+    assert db.get(Booking, first.id).status == BookingStatus.ACCEPTED
+    assert _profile(db, artisan).response_time_avg_minutes is None
+
+    # the next accept recomputes from the bookings table, so the stat self-heals
+    monkeypatch.undo()
+    monkeypatch.setattr(bookings_endpoints, "_notify_user", lambda *a, **k: None)
+    second = _booking(
+        db, service, customer, artisan, status=BookingStatus.PENDING, requested_minutes_ago=50
+    )
+    assert accept(client, artisan, second).status_code == 200
+    # (30 + 50) / 2 = 40: the first booking, accepted while the stat failed, is included
+    assert 39 <= _profile(db, artisan).response_time_avg_minutes <= 41

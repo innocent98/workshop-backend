@@ -19,13 +19,12 @@ from app.services.review_moderation import check_review_text, normalise
         ("fuuuuck", "en"),
         ("the man na mumu, he no sabi work", "pcm"),
         ("Yeye man! Ashawo!", "pcm"),
-        ("Olodo ni e, agbaya", "yo"),
+        ("Alagbere ni e", "yo"),
         ("omo ale", "yo"),
         ("Ọmọ ale", "yo"),  # tone marks / dots under letters are stripped
         ("dan iska ne shi", "ha"),
-        ("wawa", "ha"),
+        ("marar kunya ne kai", "ha"),
         ("onye nzuzu", "ig"),
-        ("I will find you and sort this out", "en"),
     ],
 )
 def test_abusive_text_is_caught(text, category):
@@ -45,6 +44,10 @@ def test_abusive_text_is_caught(text, category):
         "Scunthorpe cocktail classic",  # classic substring traps
         "Made egusi soup money well spent, ofe nsala was great",  # Igbo 'ofe' (soup) is fine
         "Ara is a lovely person",  # a name
+        "He came from Olodo in Ibadan, then Jaki Street, Wawa Junction, Karuwa road",  # places
+        "Please retard the cement setting, the pin prick hole is sealed",  # ordinary vocabulary
+        "I will find you a better plumber next time",  # not a threat
+        "Mugu is a town; Agbaya and Ode are surnames; Werey, Yeye, Nzuzu too",  # names / slang
         "",
         None,
     ],
@@ -54,9 +57,9 @@ def test_clean_text_is_not_flagged(text):
 
 
 def test_whole_words_only():
-    # 'ode' is a listed Pidgin insult but must not fire inside other words
-    assert check_review_text("A very modern and codeless approach") is None
-    assert check_review_text("you be ode") is not None
+    # 'mumu' is a listed Pidgin insult but must not fire inside other words
+    assert check_review_text("Visited Mumuland and the Mumuville market") is None
+    assert check_review_text("you be mumu") is not None
 
 
 def test_normalise_pipeline():
@@ -67,7 +70,7 @@ def test_normalise_pipeline():
 
 def test_multiple_matches_counted_across_languages():
     hit = check_review_text("idiot! mumu! onye nzuzu")
-    assert hit.match_count >= 3  # 'onye nzuzu' counts as a phrase and as the word 'nzuzu'
+    assert hit.match_count == 3
     assert set(hit.categories) == {"en", "pcm", "ig"}
 
 

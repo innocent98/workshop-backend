@@ -8,11 +8,12 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from geoalchemy2.elements import WKTElement
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import get_current_user
 from app.core.config import settings
+from app.core.logger import logger
 from app.db.models.booking import Booking, BookingStatus
 from app.db.models.booking_progress_log import BookingProgressLog
 from app.db.models.service import Service, UserService
@@ -64,6 +65,20 @@ def _load_booking_locked(db: Session, booking_id: int) -> Optional[Booking]:
     account deletion (which closes pending bookings), and re-check the status on fresh data
     instead of writing back a status computed from a stale read."""
     return db.query(Booking).filter(Booking.id == booking_id).with_for_update().first()
+
+
+def _record_response_time(db: Session, booking: Booking) -> None:
+    """Refresh the artisan's response-time stat without ever putting the acceptance at risk.
+
+    Runs in a SAVEPOINT with a short lock timeout: any failure (lock wait, deadlock, DB error)
+    rolls back only the stat update, is logged, and the acceptance still commits. The stat is
+    derived data; the next accept recomputes it from the bookings."""
+    try:
+        with db.begin_nested():
+            db.execute(text("SET LOCAL lock_timeout = '3s'"))
+            record_acceptance(db, booking)
+    except Exception:  # noqa: BLE001 - the stat must never fail an accept
+        logger.exception(f"response-time update failed for booking {booking.id}; accept kept")
 
 
 def _ensure_counterparty_active(db: Session, booking: Booking, current_user: User) -> None:
@@ -742,8 +757,8 @@ def accept_booking(
 
     booking.status = BookingStatus.ACCEPTED
     booking.accepted_at = func.now()
-    # Same transaction as the acceptance: the response-time stat can never drift from it.
-    record_acceptance(db, booking)
+    # Same transaction as the acceptance, but isolated in a savepoint (see the helper).
+    _record_response_time(db, booking)
 
     db.commit()
     db.refresh(booking)

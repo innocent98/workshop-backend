@@ -10,8 +10,8 @@
   "response": {
     "id": 3,
     "booking_reference": "BKG-RT0003",
-    "customer_id": "5f07782a-7da9-4ea9-a502-738752378995",
-    "artisan_id": "728142dd-6897-4c3e-be4b-0bebc567b451",
+    "customer_id": "6e254903-d37c-4255-bb49-4313a27f9d16",
+    "artisan_id": "df631428-50f0-42d4-a868-59aaffb7a300",
     "service_id": 1,
     "selected_service_ids": [
       1
@@ -28,7 +28,7 @@
     "service_name": "Plumbing (demo)",
     "service_image": null,
     "job_description": "Fix leaking sink",
-    "job_date": "2026-11-19T21:52:51.308364Z",
+    "job_date": "2026-11-19T22:06:09.167570Z",
     "job_address": "12 Example Street",
     "job_latitude": 6.5244,
     "job_longitude": 3.3792,
@@ -62,8 +62,8 @@
     "negotiated_override": false,
     "cancellation_reason": null,
     "rejection_reason": "fully booked that day",
-    "created_at": "2026-11-18T21:42:51.308364Z",
-    "updated_at": "2026-11-18T21:53:29.803644Z"
+    "created_at": "2026-11-18T21:56:09.167570Z",
+    "updated_at": "2026-11-18T22:06:47.729289Z"
   },
   "note": "rejections are not counted"
 }

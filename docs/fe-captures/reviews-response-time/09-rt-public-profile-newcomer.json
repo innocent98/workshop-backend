@@ -1,12 +1,12 @@
 {
   "request": {
     "method": "GET",
-    "path": "/profiles/artisans/cdb79e17-9ea6-4f8a-8a25-325f9c19fa70",
+    "path": "/profiles/artisans/1d7ba0d5-51e1-4b94-be57-f580ea2b544d",
     "body": null
   },
   "status": 200,
   "response": {
-    "id": "cdb79e17-9ea6-4f8a-8a25-325f9c19fa70",
+    "id": "1d7ba0d5-51e1-4b94-be57-f580ea2b544d",
     "full_name": "Newcomer Artisan",
     "profile_picture_url": null,
     "bio": null,
