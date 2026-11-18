@@ -1,0 +1,69 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/search/artisans?latitude=6.5244&longitude=3.3792&sort_by=response_time&sort_order=asc",
+    "body": null
+  },
+  "status": 200,
+  "response": {
+    "results": [
+      {
+        "id": "728142dd-6897-4c3e-be4b-0bebc567b451",
+        "full_name": "Demo Artisan",
+        "profile_picture": null,
+        "location_address": "12 Example Street, Lagos",
+        "service_radius_km": 10.0,
+        "hourly_rate_min": null,
+        "hourly_rate_max": null,
+        "years_of_experience": null,
+        "specialization": "Plumbing",
+        "is_verified": false,
+        "availability_status": "available",
+        "average_rating": 0.0,
+        "total_ratings": 0,
+        "total_jobs_completed": 0,
+        "response_time_avg_minutes": 33,
+        "acceptance_rate": 0.0,
+        "distance_km": 0.0,
+        "services": [],
+        "category_name": null,
+        "portfolio_sample": null
+      },
+      {
+        "id": "cdb79e17-9ea6-4f8a-8a25-325f9c19fa70",
+        "full_name": "Newcomer Artisan",
+        "profile_picture": null,
+        "location_address": "12 Example Street, Lagos",
+        "service_radius_km": 10.0,
+        "hourly_rate_min": null,
+        "hourly_rate_max": null,
+        "years_of_experience": null,
+        "specialization": "Plumbing",
+        "is_verified": false,
+        "availability_status": "available",
+        "average_rating": 0.0,
+        "total_ratings": 0,
+        "total_jobs_completed": 0,
+        "response_time_avg_minutes": null,
+        "acceptance_rate": 0.0,
+        "distance_km": 0.0,
+        "services": [],
+        "category_name": null,
+        "portfolio_sample": null
+      }
+    ],
+    "total": 2,
+    "page": 1,
+    "page_size": 20,
+    "total_pages": 1,
+    "search_location": {
+      "latitude": 6.5244,
+      "longitude": 3.3792
+    },
+    "filters_applied": {
+      "radius_km": 10.0,
+      "verified_only": false
+    }
+  },
+  "note": "artisans with no figure sort last in both directions"
+}

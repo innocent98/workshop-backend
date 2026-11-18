@@ -1,0 +1,27 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/reviews/3/report",
+    "body": {
+      "reason": "i dislike it",
+      "details": null
+    }
+  },
+  "status": 422,
+  "response": {
+    "detail": [
+      {
+        "type": "literal_error",
+        "loc": [
+          "body",
+          "reason"
+        ],
+        "msg": "Input should be 'abusive', 'spam', 'fake' or 'other'",
+        "input": "i dislike it",
+        "ctx": {
+          "expected": "'abusive', 'spam', 'fake' or 'other'"
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/profiles/artisans/cdb79e17-9ea6-4f8a-8a25-325f9c19fa70",
+    "body": null
+  },
+  "status": 200,
+  "response": {
+    "id": "cdb79e17-9ea6-4f8a-8a25-325f9c19fa70",
+    "full_name": "Newcomer Artisan",
+    "profile_picture_url": null,
+    "bio": null,
+    "location_address": "12 Example Street, Lagos",
+    "service_radius_km": 10.0,
+    "hourly_rate_min": null,
+    "hourly_rate_max": null,
+    "years_of_experience": null,
+    "specialization": "Plumbing",
+    "is_verified": false,
+    "availability_status": "available",
+    "average_rating": 0.0,
+    "total_ratings": 0,
+    "total_jobs_completed": 0,
+    "response_time_avg_minutes": null
+  },
+  "note": "no accepted booking: null"
+}

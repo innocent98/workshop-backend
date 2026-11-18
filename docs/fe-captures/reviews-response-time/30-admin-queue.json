@@ -1,0 +1,68 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/admin/reviews",
+    "body": null
+  },
+  "status": 200,
+  "response": {
+    "items": [
+      {
+        "id": 3,
+        "booking_id": 6,
+        "rating": 3.0,
+        "review_text": "Decent job, a bit slow but the sink is fixed.",
+        "is_anonymous": false,
+        "customer_id": "5f07782a-7da9-4ea9-a502-738752378995",
+        "customer_name": "Customer Three",
+        "artisan_id": "728142dd-6897-4c3e-be4b-0bebc567b451",
+        "artisan_name": "Demo Artisan",
+        "is_flagged": false,
+        "flag_source": null,
+        "flag_reason": null,
+        "flagged_at": null,
+        "open_report_count": 1,
+        "created_at": "2026-11-18T21:54:08.401510Z"
+      },
+      {
+        "id": 2,
+        "booking_id": 5,
+        "rating": 1.0,
+        "review_text": "This man na mumu, total idiot. Never again.",
+        "is_anonymous": false,
+        "customer_id": "29dfe00c-ee46-4f82-b08b-8ad8c45a51af",
+        "customer_name": "Customer Two",
+        "artisan_id": "728142dd-6897-4c3e-be4b-0bebc567b451",
+        "artisan_name": "Demo Artisan",
+        "is_flagged": true,
+        "flag_source": "auto",
+        "flag_reason": "Automatic filter: abusive language (en, pcm)",
+        "flagged_at": "2026-11-18T21:54:08.358286Z",
+        "open_report_count": 1,
+        "created_at": "2026-11-18T21:54:08.348810Z"
+      },
+      {
+        "id": 1,
+        "booking_id": 4,
+        "rating": 5.0,
+        "review_text": "Excellent work, finished on time and very professional.",
+        "is_anonymous": false,
+        "customer_id": "a5bee112-b479-4c7e-ae45-ec591d61d7b1",
+        "customer_name": "Customer One",
+        "artisan_id": "728142dd-6897-4c3e-be4b-0bebc567b451",
+        "artisan_name": "Demo Artisan",
+        "is_flagged": false,
+        "flag_source": null,
+        "flag_reason": null,
+        "flagged_at": null,
+        "open_report_count": 1,
+        "created_at": "2026-11-18T21:53:49.177255Z"
+      }
+    ],
+    "total": 3,
+    "page": 1,
+    "page_size": 20,
+    "pages": 1
+  },
+  "note": "flagged OR open reports, most reports first"
+}

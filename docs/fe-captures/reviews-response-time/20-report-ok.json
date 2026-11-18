@@ -1,0 +1,16 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/reviews/1/report",
+    "body": {
+      "reason": "fake",
+      "details": "I do not know this customer."
+    }
+  },
+  "status": 201,
+  "response": {
+    "review_id": 1,
+    "reported": true
+  },
+  "note": "any signed-in user except the author"
+}

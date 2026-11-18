@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/reviews/3/report",
+    "body": {
+      "reason": "spam",
+      "details": null
+    }
+  },
+  "status": 429,
+  "response": {
+    "detail": {
+      "code": "report_rate_limited",
+      "message": "You have reported too many reviews recently. Please try again later."
+    }
+  },
+  "note": "capture server runs with REVIEW_REPORTS_PER_USER_PER_HOUR=2 (default is 10)"
+}

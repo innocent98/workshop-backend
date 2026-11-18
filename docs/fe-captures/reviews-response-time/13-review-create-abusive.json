@@ -1,0 +1,30 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/reviews",
+    "body": {
+      "booking_id": 5,
+      "rating": 1.0,
+      "review_text": "This man na mumu, total idiot. Never again.",
+      "is_anonymous": false
+    }
+  },
+  "status": 201,
+  "response": {
+    "id": 2,
+    "booking_id": 5,
+    "customer_id": "29dfe00c-ee46-4f82-b08b-8ad8c45a51af",
+    "artisan_id": "728142dd-6897-4c3e-be4b-0bebc567b451",
+    "rating": 1.0,
+    "review_text": "This man na mumu, total idiot. Never again.",
+    "is_anonymous": false,
+    "is_flagged": true,
+    "artisan_response": null,
+    "artisan_responded_at": null,
+    "created_at": "2026-11-18T21:54:08.348810Z",
+    "updated_at": "2026-11-18T21:54:08.348810Z",
+    "customer_name": "Customer Two",
+    "artisan_name": "Demo Artisan"
+  },
+  "note": "auto-filter hit: still 201 for the reviewer"
+}

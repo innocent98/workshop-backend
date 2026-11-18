@@ -1,0 +1,21 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/reviews/artisan/728142dd-6897-4c3e-be4b-0bebc567b451/stats",
+    "body": null
+  },
+  "status": 200,
+  "response": {
+    "artisan_id": "728142dd-6897-4c3e-be4b-0bebc567b451",
+    "total_reviews": 2,
+    "average_rating": 4.0,
+    "rating_distribution": {
+      "1": 0,
+      "2": 0,
+      "3": 1,
+      "4": 0,
+      "5": 1
+    },
+    "total_jobs_completed": 3
+  }
+}

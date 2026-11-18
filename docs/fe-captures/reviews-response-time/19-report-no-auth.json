@@ -1,0 +1,14 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/reviews/1/report",
+    "body": {
+      "reason": "fake",
+      "details": null
+    }
+  },
+  "status": 403,
+  "response": {
+    "detail": "Not authenticated"
+  }
+}

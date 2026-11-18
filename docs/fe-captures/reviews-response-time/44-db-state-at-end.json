@@ -1,0 +1,74 @@
+{
+  "reviews": [
+    {
+      "id": 1,
+      "rating": 5.0,
+      "is_flagged": false,
+      "flag_source": null,
+      "flag_reason": null,
+      "open_report_count": 0
+    },
+    {
+      "id": 2,
+      "rating": 1.0,
+      "is_flagged": false,
+      "flag_source": null,
+      "flag_reason": null,
+      "open_report_count": 0
+    },
+    {
+      "id": 3,
+      "rating": 3.0,
+      "is_flagged": false,
+      "flag_source": null,
+      "flag_reason": null,
+      "open_report_count": 1
+    }
+  ],
+  "reports": [
+    {
+      "review_id": 1,
+      "reason": "fake",
+      "resolved": true
+    },
+    {
+      "review_id": 2,
+      "reason": "abusive",
+      "resolved": true
+    },
+    {
+      "review_id": 3,
+      "reason": "fake",
+      "resolved": false
+    }
+  ],
+  "audit_log": [
+    {
+      "action": "review.flag",
+      "target": "review:1",
+      "details": {
+        "note": "Reporter is right: this person never used the service.",
+        "was_flagged": false,
+        "reports_resolved": 1
+      }
+    },
+    {
+      "action": "review.unflag",
+      "target": "review:1",
+      "details": {
+        "note": "Booking records confirm the job; restoring.",
+        "was_flagged": true,
+        "reports_resolved": 0
+      }
+    },
+    {
+      "action": "review.unflag",
+      "target": "review:2",
+      "details": {
+        "note": "Reviewed: harsh but fair, slang.",
+        "was_flagged": true,
+        "reports_resolved": 1
+      }
+    }
+  ]
+}

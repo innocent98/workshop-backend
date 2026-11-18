@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/reviews/1/report",
+    "body": {
+      "reason": "spam",
+      "details": null
+    }
+  },
+  "status": 409,
+  "response": {
+    "detail": {
+      "code": "already_reported",
+      "message": "You have already reported this review."
+    }
+  }
+}

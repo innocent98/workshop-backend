@@ -1,0 +1,69 @@
+{
+  "request": {
+    "method": "PATCH",
+    "path": "/bookings/2/accept",
+    "body": {
+      "agreed_amount": 8000
+    }
+  },
+  "status": 200,
+  "response": {
+    "id": 2,
+    "booking_reference": "BKG-RT0002",
+    "customer_id": "29dfe00c-ee46-4f82-b08b-8ad8c45a51af",
+    "artisan_id": "728142dd-6897-4c3e-be4b-0bebc567b451",
+    "service_id": 1,
+    "selected_service_ids": [
+      1
+    ],
+    "selected_service_names": [
+      "Plumbing (demo)"
+    ],
+    "customer_name": "Customer Two",
+    "customer_profile_picture_url": null,
+    "customer_phone_number": "+2348000000004",
+    "artisan_name": "Demo Artisan",
+    "artisan_profile_picture_url": null,
+    "artisan_phone_number": "+2348000000002",
+    "service_name": "Plumbing (demo)",
+    "service_image": null,
+    "job_description": "Fix leaking sink",
+    "job_date": "2026-11-19T21:52:51.303941Z",
+    "job_address": "12 Example Street",
+    "job_latitude": 6.5244,
+    "job_longitude": 3.3792,
+    "budget_min": "5000.00",
+    "budget_max": "10000.00",
+    "agreed_amount": "8000.00",
+    "status": "accepted",
+    "accepted_at": "2026-11-18T21:53:10.652477Z",
+    "paid_at": null,
+    "started_at": null,
+    "completed_at": null,
+    "cancelled_at": null,
+    "completion_notes": null,
+    "completion_images": null,
+    "completion_marked_by_artisan_at": null,
+    "completion_confirmed_by_client_at": null,
+    "completion_confirmation_deadline_at": null,
+    "completion_disputed_at": null,
+    "completion_dispute_reason": null,
+    "progress_logs": [],
+    "negotiated_amount": null,
+    "negotiation_condition": null,
+    "negotiation_status": "none",
+    "negotiation_last_offer_by": null,
+    "artisan_negotiation_rounds_used": 0,
+    "client_negotiation_rounds_used": 0,
+    "negotiation_started_at": null,
+    "negotiation_updated_at": null,
+    "negotiation_agreed_at": null,
+    "negotiation_declined_at": null,
+    "negotiated_override": false,
+    "cancellation_reason": null,
+    "rejection_reason": null,
+    "created_at": "2026-11-18T21:12:51.303941Z",
+    "updated_at": "2026-11-18T21:53:10.652477Z"
+  },
+  "note": "request seeded 40 min ago"
+}

@@ -1,0 +1,16 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/admin/reviews/99999/flag",
+    "body": {
+      "note": "does not exist"
+    }
+  },
+  "status": 404,
+  "response": {
+    "detail": {
+      "code": "review_not_found",
+      "message": "Review not found"
+    }
+  }
+}

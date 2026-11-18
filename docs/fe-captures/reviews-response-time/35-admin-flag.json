@@ -1,0 +1,27 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/admin/reviews/1/flag",
+    "body": {
+      "note": "Reporter is right: this person never used the service."
+    }
+  },
+  "status": 200,
+  "response": {
+    "id": 1,
+    "booking_id": 4,
+    "rating": 5.0,
+    "review_text": "Excellent work, finished on time and very professional.",
+    "is_anonymous": false,
+    "customer_id": "a5bee112-b479-4c7e-ae45-ec591d61d7b1",
+    "customer_name": "Customer One",
+    "artisan_id": "728142dd-6897-4c3e-be4b-0bebc567b451",
+    "artisan_name": "Demo Artisan",
+    "is_flagged": true,
+    "flag_source": "admin",
+    "flag_reason": "Reporter is right: this person never used the service.",
+    "flagged_at": "2026-11-18T21:54:27.922739Z",
+    "open_report_count": 0,
+    "created_at": "2026-11-18T21:53:49.177255Z"
+  }
+}
