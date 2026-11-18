@@ -32,6 +32,7 @@ from app.schemas.booking import (
     NegotiateResponseRequest,
     RejectBookingRequest,
 )
+from app.services.response_time import record_acceptance
 from app.tasks.notification_tasks import send_push_notification
 from app.utils.booking_reference import generate_booking_reference
 from app.utils.file_upload import save_booking_progress_image
@@ -741,6 +742,8 @@ def accept_booking(
 
     booking.status = BookingStatus.ACCEPTED
     booking.accepted_at = func.now()
+    # Same transaction as the acceptance: the response-time stat can never drift from it.
+    record_acceptance(db, booking)
 
     db.commit()
     db.refresh(booking)

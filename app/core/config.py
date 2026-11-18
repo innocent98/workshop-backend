@@ -114,6 +114,16 @@ class Settings(BaseSettings):
     VERIFICATION_MAX_ATTEMPTS: int = 5
     VERIFICATION_WINDOW_HOURS: int = 24
 
+    # Reviews: abusive-language first pass (word list in app/data/review_abuse_terms.json; extra
+    # comma-separated words/phrases can be added here without a deploy) and report limits.
+    REVIEW_ABUSE_FILTER_ENABLED: bool = True
+    REVIEW_ABUSE_EXTRA_TERMS: str = ""
+    REVIEW_REPORT_IP_RATE_LIMIT: str = "30/hour"  # slowapi backstop, per IP
+    REVIEW_REPORTS_PER_USER_PER_HOUR: int = 10  # the real cap, per user (IPs are shared on CGNAT)
+
+    # Response-time stat: average of the artisan's last N accepted bookings
+    RESPONSE_TIME_WINDOW: int = 20
+
     # Admin
     FIRST_SUPERUSER_EMAIL: EmailStr
     FIRST_SUPERUSER_PASSWORD: str

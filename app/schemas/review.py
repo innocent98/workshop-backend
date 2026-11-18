@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -87,3 +87,23 @@ class ArtisanReviewStatsResponse(BaseModel):
     average_rating: float
     rating_distribution: dict
     total_jobs_completed: int
+
+
+class ReportReviewRequest(BaseModel):
+    """Request schema for reporting a review to the moderators"""
+
+    reason: Literal["abusive", "spam", "fake", "other"]
+    details: Optional[str] = Field(None, max_length=500)
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {"reason": "abusive", "details": "Uses insults, nothing about the job."}
+        }
+    )
+
+
+class ReportReviewResponse(BaseModel):
+    """A report was recorded. Reports never hide a review by themselves: a moderator decides."""
+
+    review_id: int
+    reported: bool = True

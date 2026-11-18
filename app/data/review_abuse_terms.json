@@ -1,0 +1,22 @@
+{
+  "_comment": "First-pass abusive-language list for customer reviews. Matched on whole words/phrases after lower-casing, accent stripping (Yoruba tone marks), leetspeak mapping (0->o, 1->i, 3->e, 4->a, 5->s, 7->t, @->a, $->s), collapsing repeated letters and '*' masks, so 'fuuuck', 'sh1t' and 'f*ck' all hit. A match only HIDES the review pending an admin look; it is never a ban. Keep this list high-precision: words that are also ordinary vocabulary or names (soup, thief, dull) are deliberately left out, the report flow covers those. Add words here or through the REVIEW_ABUSE_EXTRA_TERMS setting. Entries are lowercase; multi-word entries are phrases.",
+  "en": [
+    "fuck", "fucker", "fucking", "motherfucker", "shit", "shitty", "bullshit", "bitch", "bitches", "bastard",
+    "asshole", "arsehole", "dickhead", "prick", "cunt", "whore", "slut", "idiot", "moron",
+    "retard", "dumbass", "jackass", "piece of shit", "son of a bitch", "go to hell",
+    "kill yourself", "i will kill you", "i will find you"
+  ],
+  "pcm": [
+    "mumu", "oponu", "ashawo", "olosho", "oloshi", "yeye", "yeye man", "yeye woman",
+    "werey", "mugu", "oloriburuku", "ode"
+  ],
+  "yo": [
+    "omo ale", "omo ita", "agbaya", "olodo", "alagbere", "agba ofo"
+  ],
+  "ha": [
+    "wawa", "shashasha", "dan iska", "dan banza", "karuwa", "marar kunya", "jaki"
+  ],
+  "ig": [
+    "onye nzuzu", "nzuzu", "onye ara"
+  ]
+}
