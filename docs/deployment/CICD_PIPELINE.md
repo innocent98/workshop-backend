@@ -103,6 +103,7 @@ Everything below differs from the stock template; see `docs/sop/deploy-pipeline.
 | Rate-limit reset | The staging E2E step clears slowapi's `LIMITER*` keys (the template cleared `http_*`). |
 | Pre-migration snapshot | Production runs `scripts/backup_cron.sh` before `alembic upgrade head` when a database exists. |
 | Image prune | Scoped to images carrying this repo's `org.opencontainers.image.source` label; the VPS is shared, a bare `prune -a` would delete other projects' unused images. |
+| Trivy | **TEMPORARILY report-only** (`exit-code: '0'`): the first scan found fixable HIGH/CRITICAL CVEs in the Python dependencies. Flip back to `'1'` once the dependency-security PR has merged. The image must still build. |
 | Poetry | Pinned to 2.2.1, the version that generated `poetry.lock`. |
 | "Verified" needs CI | `mark-verified` waits (up to 30 min) for the `CI gate` check run on the same commit and refuses to tag the image if it is red or missing. Without this, a commit with failing tests could be deployed to staging, pass the 7 read-only smoke checks, be stamped verified and be fast-forwarded to production. |
 | Health gate | After the API answers, the deploy also waits for `celery_worker` and `celery_beat` to be `healthy` with no restarts (they run payouts, reconcile and auto-confirm). Otherwise: automatic rollback. |
