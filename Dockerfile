@@ -41,11 +41,13 @@ LABEL org.opencontainers.image.revision=$GIT_SHA \
 
 WORKDIR /app
 
-# Install only runtime dependencies (no build tools)
+# Install only runtime dependencies (no build tools). `apt-get upgrade` picks up fixed OS packages
+# published since the base image was built (the Trivy gate flagged zlib1g).
 RUN apt-get update && apt-get install -y \
     netcat-traditional \
     libpq5 \
     curl \
+    && apt-get upgrade -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
