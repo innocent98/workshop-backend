@@ -7,7 +7,7 @@ How we ship environment files to the VPS without leaking secrets to git.
 1. Keep `.env.staging` and `.env.production` in `.gitignore` (plaintext — **never committed**).
 2. Encrypt them to `.env.staging.enc` and `.env.production.enc` with AES-256-CBC + PBKDF2 (100k iterations) using `./scripts/env.sh`.
 3. Commit the `.enc` files.
-4. Store the AES key as the GitHub environment secret `ENV_ENCRYPTION_KEY` (**Workchop uses a different key per environment**: `scripts/env.sh` reads `ENV_ENCRYPTION_KEY_<ENV>`, then `ENV_ENCRYPTION_KEY`, then `.env.<env>.key`, then `.env.key`; in GitHub the secret is named `ENV_ENCRYPTION_KEY` in each Environment with that environment's own value).
+4. Store the AES key as the GitHub environment secret `ENV_ENCRYPTION_KEY` (**Workchop uses a different key per environment**: `scripts/env.sh` reads `ENV_ENCRYPTION_KEY_<ENV>`, then `.env.<env>.key` (no shared `ENV_ENCRYPTION_KEY` / `.env.key` fallback); in GitHub the secret is named `ENV_ENCRYPTION_KEY` in each Environment with that environment's own value).
 5. CD decrypts on the runner, `scp`s the resulting `.env` to the VPS, then the file is deleted from the runner when the job ends.
 
 This gives you:
@@ -105,10 +105,10 @@ Does NOT write plaintext to disk:
 
 ```bash
 ./scripts/env.sh rotate staging
-# → prints new key + instructions to re-encrypt the other env
+# → re-encrypts staging with a NEW key, updates .env.staging.key if that file exists, prints the key
 ```
 
-Follow the printed instructions exactly — update the GitHub secret, your password manager, and re-encrypt the *other* environment with the new key.
+Then update that environment's GitHub secret `ENV_ENCRYPTION_KEY` and your password manager. Only that environment changes: the other one has its own key and is untouched. If you pass the key via `ENV_ENCRYPTION_KEY_STAGING` instead of a key file, update that variable yourself.
 
 ## Manual decrypt (for debugging only)
 
@@ -116,7 +116,7 @@ Follow the printed instructions exactly — update the GitHub secret, your passw
 openssl enc -aes-256-cbc -d -pbkdf2 -iter 100000 \
   -in .env.staging.enc \
   -out .env.staging \
-  -pass "pass:$ENV_ENCRYPTION_KEY"
+  -pass "pass:$(cat .env.staging.key)"   # visible in `ps` for a moment: debugging only
 ```
 
 This is what CD does under the hood. `env.sh decrypt` wraps this with key discovery and overwrite protection.
@@ -131,7 +131,8 @@ The template's `.gitignore` already has these, but confirm:
 .env.local
 .env.staging
 .env.production
-.env.key
+.env.staging.key
+.env.production.key
 ```
 
 ## Key management
@@ -142,7 +143,7 @@ Store it in **exactly three** places:
 
 1. Your password manager (for recovery).
 2. GitHub → Settings → Environments → `staging` / `production` → secret `ENV_ENCRYPTION_KEY`.
-3. Your local `.env.key` (gitignored).
+3. Your local `.env.<env>.key` (gitignored, `chmod 600`), one file per environment.
 
 **Not in Slack, not in email, not in a plaintext `passphrase.txt` file.**
 

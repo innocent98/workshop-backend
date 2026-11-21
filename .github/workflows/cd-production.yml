@@ -24,7 +24,7 @@ on:
   workflow_dispatch:
     inputs:
       image_tag:
-        description: "Roll back: redeploy an EXISTING image tag (e.g. sha-a1b2c3d). It must have been staging-verified."
+        description: "ROLLBACK ONLY: redeploy an EXISTING image tag (e.g. sha-a1b2c3d). It must have been staging-verified. Migrations are SKIPPED, so never use this to roll forward to a newer-schema release."
         required: false
         type: string
 

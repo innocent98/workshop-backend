@@ -243,6 +243,21 @@ runs:
             echo "    run_migrations=false (rollback): skipping snapshot, alembic and seed; schema untouched"
           fi
 
+          # WORKCHOP: remember each Celery container's id and restart counter BEFORE `up -d`.
+          # Docker only resets RestartCount when a container is recreated, so a re-run with the
+          # same image and .env leaves the old container in place; judging the absolute counter
+          # would fail every retry after one old restart. We fail only if it INCREASES, or the
+          # container is unhealthy / missing.
+          for svc in celery_worker celery_beat; do
+            old_cid="$(${COMPOSE} ps -q "${svc}" 2>/dev/null || true)"
+            old_rc=0
+            if [ -n "${old_cid}" ]; then
+              old_rc="$(docker inspect -f '{{.RestartCount}}' "${old_cid}" 2>/dev/null || echo 0)"
+            fi
+            printf -v "BASE_CID_${svc}" '%s' "${old_cid}"
+            printf -v "BASE_RC_${svc}" '%s' "${old_rc}"
+          done
+
           echo "==> [${STACK_ENV}] 5/6 Starting the stack"
           ${COMPOSE} up -d --remove-orphans
 
@@ -265,14 +280,18 @@ runs:
           # healthchecks must turn healthy and the containers must not have restarted.
           echo "==> [${STACK_ENV}] 6b/6 Waiting for celery_worker and celery_beat"
           wait_healthy() {
-            local svc="$1" cid st rc
+            local svc="$1" cid st rc base_cid_var base_rc_var base_rc
             cid="$(${COMPOSE} ps -q "${svc}" 2>/dev/null || true)"
             if [ -z "${cid}" ]; then echo "::error::[${STACK_ENV}] ${svc} has no container"; return 1; fi
+            # Baseline only applies to the SAME container; a recreated one starts from 0.
+            base_cid_var="BASE_CID_${svc}"; base_rc_var="BASE_RC_${svc}"
+            base_rc=0
+            if [ "${!base_cid_var:-}" = "${cid}" ]; then base_rc="${!base_rc_var:-0}"; fi
             for _ in $(seq 1 60); do
               st="$(docker inspect -f '{{.State.Health.Status}}' "${cid}" 2>/dev/null || echo none)"
               rc="$(docker inspect -f '{{.RestartCount}}' "${cid}" 2>/dev/null || echo 0)"
-              if [ "${rc}" -gt 0 ]; then
-                echo "::error::[${STACK_ENV}] ${svc} restarted ${rc} time(s): crash loop"; return 1
+              if [ "${rc}" -gt "${base_rc}" ]; then
+                echo "::error::[${STACK_ENV}] ${svc} restarted $((rc - base_rc)) time(s) during this deploy: crash loop"; return 1
               fi
               if [ "${st}" = "healthy" ]; then echo "    ${svc} healthy"; return 0; fi
               if [ "${st}" = "unhealthy" ]; then echo "::error::[${STACK_ENV}] ${svc} is unhealthy"; return 1; fi

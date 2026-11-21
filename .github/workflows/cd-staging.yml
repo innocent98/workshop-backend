@@ -21,7 +21,7 @@ on:
   workflow_dispatch:
     inputs:
       image_tag:
-        description: "Redeploy an EXISTING image tag to staging instead of building (e.g. sha-a1b2c3d)"
+        description: "ROLLBACK ONLY: redeploy an EXISTING image tag to staging instead of building (e.g. sha-a1b2c3d). Migrations are SKIPPED, so never use this to roll forward to a newer-schema release."
         required: false
         type: string
 
@@ -253,19 +253,34 @@ jobs:
           SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          for i in $(seq 1 60); do   # up to 30 minutes
+          for i in $(seq 1 60); do   # at most 30 minutes
+            # A newer commit on develop supersedes this one: stop now instead of polling a CI run
+            # that will never finish (ci.yml cancels superseded PR runs). Fail safe: this image is
+            # not verified and cannot be promoted; the newer commit's own run verifies that one.
+            HEAD_SHA="$(gh api "repos/${REPO}/commits/develop" --jq .sha)"
+            if [ "${HEAD_SHA}" != "${SHA}" ]; then
+              echo "::error title=Superseded::develop moved on to ${HEAD_SHA}; ${SHA} will not be marked verified. The newer commit's run decides."
+              exit 1
+            fi
             RUNS="$(gh api "repos/${REPO}/commits/${SHA}/check-runs?per_page=100" \
               --jq '[.check_runs[] | select(.name == "CI gate")] | map({status, conclusion})')"
             N="$(echo "${RUNS}" | jq 'length')"
-            BAD="$(echo "${RUNS}" | jq '[.[] | select(.status == "completed" and .conclusion != "success")] | length')"
             PENDING="$(echo "${RUNS}" | jq '[.[] | select(.status != "completed")] | length')"
-            if [ "${BAD}" -gt 0 ]; then
-              echo "::error title=CI gate is red::CI gate did not pass for ${SHA}. Not marking this image verified. Fix CI, push, and let a new run verify the new commit."
+            OK="$(echo "${RUNS}" | jq '[.[] | select(.status == "completed" and .conclusion == "success")] | length')"
+            RED="$(echo "${RUNS}" | jq '[.[] | select(.status == "completed" and .conclusion != "success" and .conclusion != "cancelled" and .conclusion != "skipped")] | length')"
+            if [ "${RED}" -gt 0 ]; then
+              echo "::error title=CI gate is red::CI gate did not pass for ${SHA}. Not marking this image verified. Fix CI and push; the new commit gets its own run."
               exit 1
             fi
-            if [ "${N}" -gt 0 ] && [ "${PENDING}" -eq 0 ]; then
+            if [ "${PENDING}" -eq 0 ] && [ "${OK}" -gt 0 ]; then
               echo "CI gate passed for ${SHA}"
               exit 0
+            fi
+            if [ "${N}" -gt 0 ] && [ "${PENDING}" -eq 0 ] && [ "${OK}" -eq 0 ]; then
+              # Every CI gate run for this commit finished cancelled/skipped and none passed:
+              # nothing is coming. Re-run CI for the commit, then re-run this workflow.
+              echo "::error title=No passing CI gate::Every CI gate run for ${SHA} was cancelled or skipped. Not marking this image verified. Re-run CI for this commit, then re-run this workflow."
+              exit 1
             fi
             echo "Waiting for CI gate on ${SHA} (found ${N}, pending ${PENDING}) [${i}/60]"
             sleep 30

@@ -22,6 +22,8 @@ Redeploy an earlier image. It must be one that was staging-verified; production 
 
 Rollback to **staging** works the same way from **CD (staging) → Run workflow → `image_tag`**. It deploys the existing image and does not build or mark anything verified.
 
+**`image_tag` runs are ROLLBACK ONLY. Never use them to roll *forward* to a release with a newer schema.** Migrations are skipped, so the new code would start on an old schema. To go forward, push to `develop` and let a normal deploy run.
+
 **A manual rollback skips the migration step.** The workflow passes `run_migrations: false` whenever `image_tag` is given: no pre-migration snapshot, no `alembic upgrade head`, no seed hook. Reason: the older image's Alembic does not know the database's newer revision, so `upgrade head` would fail ("Can't locate revision") and block the very rollback it is meant to allow. The schema stays at the newer revision and the older code runs against it, which is why migrations must stay backward-compatible for one release.
 
 If a bad migration damaged **data** (not just code), rolling back the image is not enough: restore the pre-migration snapshot with `scripts/restore_db.sh` (see `BACKUPS_GUIDE.md`) and then roll back the image so code and schema agree. Production keeps a snapshot from before every migrating deploy in `backups/`.

@@ -17,7 +17,9 @@
 #     and scripts/restore_db.sh address `${COMPOSE_PROJECT_NAME}_db`
 #
 # Required in .env (see .env.production.example): API_IMAGE (set by the deploy),
-# COMPOSE_PROJECT_NAME, API_PORT, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB.
+# COMPOSE_PROJECT_NAME, API_PORT, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB,
+# FCM_SERVICE_ACCOUNT_FILE_HOST (no default on purpose: staging must never silently mount the
+# production service account).
 
 x-app-env: &app-env
   env_file: .env
@@ -55,7 +57,7 @@ services:
     volumes:
       # Firebase service account JSON, placed on the host by the owner (never in git or the
       # image). The file MUST exist before the first deploy or Docker creates a directory.
-      - ${FCM_SERVICE_ACCOUNT_FILE_HOST:-/opt/workchop/secrets/fcm-service-account.json}:/run/secrets/fcm-service-account.json:ro
+      - ${FCM_SERVICE_ACCOUNT_FILE_HOST:?set FCM_SERVICE_ACCOUNT_FILE_HOST in .env (see .env.<env>.example)}:/run/secrets/fcm-service-account.json:ro
     depends_on:
       db:
         condition: service_healthy
@@ -81,7 +83,7 @@ services:
     <<: *app-env
     command: celery -A app.celery_app worker --loglevel=info --concurrency=2
     volumes:
-      - ${FCM_SERVICE_ACCOUNT_FILE_HOST:-/opt/workchop/secrets/fcm-service-account.json}:/run/secrets/fcm-service-account.json:ro
+      - ${FCM_SERVICE_ACCOUNT_FILE_HOST:?set FCM_SERVICE_ACCOUNT_FILE_HOST in .env (see .env.<env>.example)}:/run/secrets/fcm-service-account.json:ro
     depends_on:
       db:
         condition: service_healthy

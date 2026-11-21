@@ -186,6 +186,16 @@ cmd_rotate() {
         -in "$tmp" -out "$enc" -pass env:ENV_ENC_PASS
     rm -f "$tmp"
 
+    # Keep the local key file in step with the re-encrypted file, or the next command would use a
+    # stale key. (Written only when that file already exists; an env-var key is yours to update.)
+    local keyfile="$PROJECT_ROOT/.env.$env.key"
+    if [ -f "$keyfile" ]; then
+        ( umask 077; printf '%s\n' "$new_key" > "$keyfile" )
+        echo -e "${CYAN}Updated $keyfile with the new key.${NC}"
+    else
+        echo -e "${YELLOW}No $keyfile to update: if you pass the key via ENV_ENCRYPTION_KEY_$(echo "$env" | tr '[:lower:]' '[:upper:]'), change it now.${NC}"
+    fi
+
     echo -e "${GREEN}New key:${NC} $new_key"
     echo ""
     echo -e "${YELLOW}IMPORTANT - Update ALL locations with the new key:${NC}"

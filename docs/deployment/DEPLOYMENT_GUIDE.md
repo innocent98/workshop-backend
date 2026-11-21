@@ -49,7 +49,7 @@ the schema stays at the new head.
 `.env.staging.enc` / `.env.production.enc` are committed encrypted ([ENV_ENCRYPTION.md](ENV_ENCRYPTION.md)).
 `.env.staging.example` / `.env.production.example` list every variable. Two things worth knowing:
 
-- `DATABASE_URL` and `REDIS_URL` are **built by the compose file** from `POSTGRES_*`; do not set them in the env file.
+- `DATABASE_URL` and `REDIS_URL` are **built by the compose file** from `POSTGRES_*`; do not set them in the env file. `FCM_SERVICE_ACCOUNT_FILE_HOST` has **no default**: compose refuses to start without it, so an environment can never silently mount another environment's Firebase key.
 - `PAYSTACK_WEBHOOK_SECRET` must equal `PAYSTACK_SECRET_KEY` (Paystack signs with the secret key; the app rejects all webhooks when it is empty).
 
 ## Nginx and TLS
