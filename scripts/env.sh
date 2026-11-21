@@ -99,8 +99,8 @@ cmd_encrypt() {
     key=$(get_key "$env")
     [ -z "$key" ] && { echo -e "${RED}Error: No encryption key provided.${NC}"; exit 1; }
 
-    openssl enc -aes-256-cbc -salt -pbkdf2 -iter 100000 \
-        -in "$plain" -out "$enc" -pass "pass:$key"
+    ENV_ENC_PASS="$key" openssl enc -aes-256-cbc -salt -pbkdf2 -iter 100000 \
+        -in "$plain" -out "$enc" -pass env:ENV_ENC_PASS
 
     echo -e "${GREEN}Encrypted:${NC} .env.$env -> .env.$env.enc"
     echo -e "  File size: $(wc -c < "$enc") bytes"
@@ -134,8 +134,8 @@ cmd_decrypt() {
     key=$(get_key "$env")
     [ -z "$key" ] && { echo -e "${RED}Error: No encryption key provided.${NC}"; exit 1; }
 
-    if ! openssl enc -aes-256-cbc -d -pbkdf2 -iter 100000 \
-        -in "$enc" -out "$plain" -pass "pass:$key" 2>/dev/null; then
+    if ! ENV_ENC_PASS="$key" openssl enc -aes-256-cbc -d -pbkdf2 -iter 100000 \
+        -in "$enc" -out "$plain" -pass env:ENV_ENC_PASS 2>/dev/null; then
         rm -f "$plain"
         echo -e "${RED}Decryption failed. Wrong key or corrupted file.${NC}"
         exit 1
@@ -156,8 +156,8 @@ cmd_verify() {
     local key
     key=$(get_key "$env")
 
-    if openssl enc -aes-256-cbc -d -pbkdf2 -iter 100000 \
-        -in "$enc" -pass "pass:$key" 2>/dev/null | head -1 | grep -q '='; then
+    if ENV_ENC_PASS="$key" openssl enc -aes-256-cbc -d -pbkdf2 -iter 100000 \
+        -in "$enc" -pass env:ENV_ENC_PASS 2>/dev/null | head -1 | grep -q '='; then
         echo -e "${GREEN}Verification passed.${NC} .env.$env.enc can be decrypted."
     else
         echo -e "${RED}Verification failed.${NC} Wrong key or corrupted file."
@@ -179,8 +179,8 @@ cmd_rotate() {
     old_key=$(get_key "$env")
 
     local tmp="$PROJECT_ROOT/.env.$env.tmp"
-    if ! openssl enc -aes-256-cbc -d -pbkdf2 -iter 100000 \
-        -in "$enc" -out "$tmp" -pass "pass:$old_key" 2>/dev/null; then
+    if ! ENV_ENC_PASS="$old_key" openssl enc -aes-256-cbc -d -pbkdf2 -iter 100000 \
+        -in "$enc" -out "$tmp" -pass env:ENV_ENC_PASS 2>/dev/null; then
         rm -f "$tmp"
         echo -e "${RED}Decryption failed with current key.${NC}"
         exit 1
@@ -189,8 +189,8 @@ cmd_rotate() {
     local new_key
     new_key=$(openssl rand -hex 32)
 
-    openssl enc -aes-256-cbc -salt -pbkdf2 -iter 100000 \
-        -in "$tmp" -out "$enc" -pass "pass:$new_key"
+    ENV_ENC_PASS="$new_key" openssl enc -aes-256-cbc -salt -pbkdf2 -iter 100000 \
+        -in "$tmp" -out "$enc" -pass env:ENV_ENC_PASS
     rm -f "$tmp"
 
     echo -e "${GREEN}New key:${NC} $new_key"
