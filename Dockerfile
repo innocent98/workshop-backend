@@ -33,6 +33,12 @@ RUN poetry install --only main --no-root
 # ============================================
 FROM python:3.11-slim AS runtime
 
+# The deploy pipeline passes the commit SHA (cd-staging.yml build-args); recorded as an
+# image label so `docker inspect` on the VPS shows which commit is running.
+ARG GIT_SHA=unknown
+LABEL org.opencontainers.image.revision=$GIT_SHA \
+      org.opencontainers.image.source="https://github.com/innocent98/workshop-backend"
+
 WORKDIR /app
 
 # Install only runtime dependencies (no build tools)

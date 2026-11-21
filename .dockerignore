@@ -31,3 +31,5 @@ coverage.xml
 poetry.toml
 requirements.txt
 requirements-dev.txt
+.env.*
+!.env.example
