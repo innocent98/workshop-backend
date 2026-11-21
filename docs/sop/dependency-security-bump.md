@@ -43,8 +43,7 @@ unchanged after the pins were removed.
 
 | Finding | Why | Action |
 |---|---|---|
-| `wheel` 0.45.1 (HIGH) | comes from the base image, not our lock; the current `python:3.11-slim` ships wheel 0.46.3, so a base-image refresh clears it | none, or `pip install -U wheel` in the Dockerfile |
-| `jaraco.context` 5.3.0 (HIGH) | vendored inside `setuptools` (79.0.1 in the base image). setuptools >= 80.10.1 vendors 6.1.0 | Dockerfile: `pip install --no-cache-dir -U "setuptools>=80.10.1"` in **both** stages (the runtime stage copies the builder's site-packages) |
+| `jaraco.context` 5.3.0 and `wheel` 0.45.1 (both HIGH) | both are **vendored inside `setuptools`** (79.0.1 in the base image, `setuptools/_vendor/...`), not in our lock; CI's Trivy scan of this PR's image shows exactly these two as the only remaining findings. The top-level `wheel` in the base image is already 0.46.3. setuptools >= 80.10.2 vendors jaraco.context 6.1.0 and wheel 0.46.3 | Dockerfile: `pip install --no-cache-dir -U "setuptools>=80.10.2"` in **both** stages (the runtime stage copies the builder's site-packages) |
 | `zlib1g` (HIGH, OS) | already handled by `apt-get upgrade` in the runtime stage | none |
 
 The Dockerfile belongs to the pipeline owner and was not touched here.
@@ -101,6 +100,7 @@ Only black/isort/flake8 and the named test files, never the full suite (CI is th
 | `app.openapi()` old vs new | same 88 paths / 126 schemas; only the schema changes listed above |
 | 8 error-shape probes old vs new (no header, bad scheme, 422 missing/bad JSON/form, 404, 405, upload 401) | identical after `HTTPBearer403` |
 | OSV audit of the new lock (main group) | no HIGH/CRITICAL with a fix; the two accepted items above remain |
+| CI `Image builds` Trivy scan on the PR image (head `beccd13`) | `Total: 2 (HIGH: 2, CRITICAL: 0)`: only the setuptools-vendored `jaraco.context` 5.3.0 and `wheel` 0.45.1; every Python package from the lock, and the OS layer, report 0 |
 
 Named files: `tests/test_dependency_upgrade_guards.py`, `tests/api/test_payments_webhook.py` (Paystack raw-body
 HMAC), `tests/admin/test_verification.py` and `tests/admin/test_signature.py` (Dojah raw-body HMAC),
@@ -118,15 +118,14 @@ picture upload (RGBA PNG, JPEG, palette GIF) resized to <= 1080 px and stored; c
 - Cloudinary upload path (needs credentials): only the local-storage branch ran. Pillow output is the same bytes either way.
 - Celery worker/beat boot and real task execution on the new stack (imports only).
 - Real email rendering through `emails`/`premailer` with lxml 6.1.0.
-- Image rebuild and Trivy re-scan (not run locally by rule): CI is the proof.
 - The Flutter client was not run against the new backend.
 
 ## Operate / roll back
 
 - Deploy is the normal pipeline. No migration, no config or env change.
 - Roll back by reverting this PR (restores the previous lock). The two code changes are self-contained.
-- After merge: flip Trivy in `ci.yml` to `exit-code: '1'`, and apply the Dockerfile `setuptools` line above if
-  `jaraco.context` still shows.
+- After merge: flip Trivy in `ci.yml` to `exit-code: '1'`, and apply the Dockerfile `setuptools` line above (Trivy
+  will still show the two vendored findings until then, so flipping it to blocking needs that line first).
 
 ## Follow-ups
 
