@@ -1,3 +1,8 @@
+> **DEPRECATED (2026-11-21).** This was the 3-day in-house test deploy. It is superseded by the CI/CD pipeline,
+> `docker-compose.prod.yml` and [`docs/deployment/DEPLOYMENT_GUIDE.md`](deployment/DEPLOYMENT_GUIDE.md). Kept for
+> reference only; do not use it for new deploys. It is not deleted because it documents the interim stack
+> (`workchop-temp_*`, port 8001) that may still be running on the VPS until it is torn down (section 7).
+
 # Workchop API Temporary VPS Deploy (3-Day In-House Test)
 
 This guide deploys the backend as an isolated temporary stack on a VPS that already runs another Docker project.

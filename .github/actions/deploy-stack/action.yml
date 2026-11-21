@@ -1,0 +1,325 @@
+name: "Deploy the compose stack to a VPS"
+description: >-
+  Decrypts the environment's .env, ships it and the compose file to the VPS,
+  pulls the image from GHCR by digest, runs migrations, waits for health, and
+  rolls back to the previous image if anything fails. Staging and production
+  run this same action; only the GitHub Environment's secrets differ.
+
+inputs:
+  environment:
+    description: "staging or production. Selects .env.<environment>.enc."
+    required: true
+  image_ref:
+    description: "Full image reference, normally pinned by @sha256 digest."
+    required: true
+  vps_host:
+    description: "VPS hostname or IP."
+    required: true
+  vps_username:
+    description: "SSH user (must be in the docker group)."
+    required: true
+  vps_ssh_key:
+    description: "Private SSH key for that user."
+    required: true
+  vps_ssh_passphrase:
+    description: "Passphrase for the key, if it has one."
+    required: false
+    default: ""
+  vps_port:
+    description: "SSH port."
+    required: false
+    default: "22"
+  deploy_path:
+    description: "Stack directory on the VPS, e.g. /opt/my-api-staging."
+    required: true
+  env_encryption_key:
+    description: "Passphrase for .env.<environment>.enc."
+    required: true
+  ghcr_username:
+    description: "GHCR user for the VPS-side docker login (the caller passes github.actor)."
+    required: true
+  ghcr_token:
+    description: "GHCR token (the caller passes the run's own GITHUB_TOKEN; the job needs packages read)."
+    required: true
+  health_path:
+    description: "Health endpoint path."
+    required: false
+    default: "/api/v1/health"
+  run_migrations:
+    description: >-
+      "true" (default) runs the pre-migration snapshot and `alembic upgrade head`. Callers pass
+      "false" for a rollback to an older image (image_tag dispatch): that image's alembic does not
+      know the database's newer revision, so `upgrade head` would fail and block the rollback.
+      Migrations are forward-only; a rollback restores CODE, never the schema.
+    required: false
+    default: "true"
+  default_api_port:
+    description: "Port to probe if the stack's .env has no API_PORT."
+    required: false
+    default: "8000"
+
+runs:
+  using: composite
+  steps:
+    # Composite actions do not enforce `required`: an input wired to a missing
+    # secret silently becomes "". Fail here, naming it, before touching the VPS.
+    - name: Check every deploy input is present
+      shell: bash
+      env:
+        VPS_HOST: ${{ inputs.vps_host }}
+        VPS_USERNAME: ${{ inputs.vps_username }}
+        VPS_SSH_KEY: ${{ inputs.vps_ssh_key }}
+        DEPLOY_PATH: ${{ inputs.deploy_path }}
+        ENV_ENCRYPTION_KEY: ${{ inputs.env_encryption_key }}
+        GHCR_USERNAME: ${{ inputs.ghcr_username }}
+        GHCR_TOKEN: ${{ inputs.ghcr_token }}
+        IMAGE_REF: ${{ inputs.image_ref }}
+      run: |
+        set -euo pipefail
+        MISSING=""
+        for v in VPS_HOST VPS_USERNAME VPS_SSH_KEY DEPLOY_PATH \
+                 ENV_ENCRYPTION_KEY GHCR_USERNAME GHCR_TOKEN IMAGE_REF; do
+          [ -n "${!v:-}" ] || MISSING="${MISSING} ${v}"
+        done
+        if [ -n "${MISSING}" ]; then
+          echo "::error::Empty deploy input(s):${MISSING}. A secret of that name is unset for this environment. Nothing was shipped. See docs/deployment/GITHUB_ACTIONS_SETUP.md."
+          exit 1
+        fi
+
+    - name: Decrypt the environment file
+      shell: bash
+      env:
+        ENVIRONMENT: ${{ inputs.environment }}
+        ENV_ENCRYPTION_KEY: ${{ inputs.env_encryption_key }}
+      run: |
+        set -euo pipefail
+        ENC=".env.${ENVIRONMENT}.enc"
+        # A missing .enc is a hard failure: deploying against whatever stale .env
+        # happens to sit on the server is unauditable.
+        if [ ! -f "${ENC}" ]; then
+          echo "::error::${ENC} not found. Create it: ./scripts/env.sh encrypt ${ENVIRONMENT}"
+          exit 1
+        fi
+        if ! openssl enc -aes-256-cbc -d -pbkdf2 -iter 100000 \
+              -in "${ENC}" -out .env -pass fd:3 3<<<"${ENV_ENCRYPTION_KEY}"; then
+          rm -f .env
+          echo "::error::Could not decrypt ${ENC}. Wrong ENV_ENCRYPTION_KEY for ${ENVIRONMENT}?"
+          exit 1
+        fi
+        chmod 600 .env
+        VARS=$(grep -cE '^[A-Za-z_][A-Za-z0-9_]*=' .env || true)
+        if [ "${VARS:-0}" -lt 3 ]; then
+          rm -f .env
+          echo "::error::${ENC} decrypted to only ${VARS} variables; refusing to deploy a truncated environment."
+          exit 1
+        fi
+        echo "Decrypted ${ENC} (${VARS} variables)"
+
+    # The backup cron script is shipped only for production: it has the
+    # production DEPLOY_PATH baked in at install time.
+    - name: Pick the files to ship
+      id: files
+      shell: bash
+      env:
+        ENVIRONMENT: ${{ inputs.environment }}
+      run: |
+        # restore_db.sh / backup_status.sh ride along so an operator can restore from
+        # the VPS without cloning the repo (run them with `bash scripts/<name>`).
+        FILES=".env,docker-compose.prod.yml,scripts/restore_db.sh,scripts/backup_status.sh"
+        if [ "${ENVIRONMENT}" = "production" ] && [ -f scripts/backup_cron.sh ]; then
+          FILES="${FILES},scripts/backup_cron.sh"
+        fi
+        echo "list=${FILES}" >> "$GITHUB_OUTPUT"
+
+    - name: Ship .env and the compose file
+      uses: appleboy/scp-action@ff85246acaad7bdce478db94a363cd2bf7c90345 # v1.0.0
+      with:
+        host: ${{ inputs.vps_host }}
+        username: ${{ inputs.vps_username }}
+        key: ${{ inputs.vps_ssh_key }}
+        passphrase: ${{ inputs.vps_ssh_passphrase }}
+        port: ${{ inputs.vps_port }}
+        # The image does NOT travel this way: the VPS pulls it from GHCR by digest.
+        source: ${{ steps.files.outputs.list }}
+        target: ${{ inputs.deploy_path }}
+        overwrite: true
+
+    - name: Deploy over SSH
+      uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1
+      env:
+        IMAGE_REF: ${{ inputs.image_ref }}
+        DEPLOY_PATH: ${{ inputs.deploy_path }}
+        GHCR_USER: ${{ inputs.ghcr_username }}
+        GHCR_TOKEN: ${{ inputs.ghcr_token }}
+        STACK_ENV: ${{ inputs.environment }}
+        HEALTH_PATH: ${{ inputs.health_path }}
+        DEFAULT_API_PORT: ${{ inputs.default_api_port }}
+        RUN_MIGRATIONS: ${{ inputs.run_migrations }}
+      with:
+        host: ${{ inputs.vps_host }}
+        username: ${{ inputs.vps_username }}
+        key: ${{ inputs.vps_ssh_key }}
+        passphrase: ${{ inputs.vps_ssh_passphrase }}
+        port: ${{ inputs.vps_port }}
+        # Passed as environment variables, not interpolated into the script, so
+        # the GHCR token never appears in the command text.
+        envs: IMAGE_REF,DEPLOY_PATH,GHCR_USER,GHCR_TOKEN,STACK_ENV,HEALTH_PATH,DEFAULT_API_PORT,RUN_MIGRATIONS
+        command_timeout: 15m
+        script: |
+          set -euo pipefail
+          mkdir -p "${DEPLOY_PATH}"
+          cd "${DEPLOY_PATH}"
+          COMPOSE="docker compose -f docker-compose.prod.yml --env-file .env"
+
+          API_PORT="$(sed -n 's/^API_PORT=//p' .env | tail -n 1)"
+          HEALTH_URL="http://127.0.0.1:${API_PORT:-${DEFAULT_API_PORT}}${HEALTH_PATH}"
+
+          echo "==> [${STACK_ENV}] 1/6 Recording the running image (for rollback)"
+          # Read from the running container: .env was just overwritten, so it
+          # cannot say what is currently serving.
+          PREV_CID="$(${COMPOSE} ps -q api 2>/dev/null || true)"
+          PREVIOUS_IMAGE=""
+          if [ -n "${PREV_CID}" ]; then
+            PREVIOUS_IMAGE="$(docker inspect --format '{{.Config.Image}}' "${PREV_CID}" 2>/dev/null || true)"
+          fi
+          echo "    previous: ${PREVIOUS_IMAGE:-<none, first deploy>}"
+          echo "    new     : ${IMAGE_REF}"
+
+          echo "==> [${STACK_ENV}] 2/6 Logging in to GHCR and pulling by digest"
+          printf '%s' "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
+          docker pull "${IMAGE_REF}"
+
+          echo "==> [${STACK_ENV}] 3/6 Pinning API_IMAGE in .env"
+          if grep -qE '^API_IMAGE=' .env; then
+            sed -i "s|^API_IMAGE=.*|API_IMAGE=${IMAGE_REF}|" .env
+          else
+            echo "API_IMAGE=${IMAGE_REF}" >> .env
+          fi
+
+          rollback() {
+            echo "!!! [${STACK_ENV}] DEPLOY FAILED; rolling back to ${PREVIOUS_IMAGE:-<nothing recorded>}"
+            if [ -n "${PREVIOUS_IMAGE}" ]; then
+              sed -i "s|^API_IMAGE=.*|API_IMAGE=${PREVIOUS_IMAGE}|" .env
+              docker pull "${PREVIOUS_IMAGE}" 2>/dev/null || true
+              # --no-deps: otherwise compose re-runs dependencies on the old
+              # image. The schema is already at the new head, so this rolls back
+              # code only. Keep migrations backward-compatible for one release.
+              # WORKCHOP: worker and beat run the same image and move money
+              # (payout reconcile, auto-confirm), so they roll back with the api.
+              ${COMPOSE} up -d --no-deps api celery_worker celery_beat
+              for _ in $(seq 1 20); do
+                if curl -fsS --max-time 5 "${HEALTH_URL}" >/dev/null 2>&1; then
+                  echo "    rollback healthy"; break
+                fi
+                sleep 3
+              done
+            fi
+            ${COMPOSE} logs --tail=80 api celery_worker celery_beat || true
+            exit 1
+          }
+          trap rollback ERR
+
+          echo "==> [${STACK_ENV}] 4/6 Migrations"
+          # Refresh third-party images if the stack has them (the API image is already pulled).
+          ${COMPOSE} pull db redis 2>/dev/null || true
+          if [ "${RUN_MIGRATIONS}" = "true" ]; then
+            # WORKCHOP: snapshot the production database before migrating. Migrations can
+            # backfill data inside one transaction (e.g. a4c8e2f6b1d9) and a snapshot is the
+            # only way back from a bad one. Skipped when no db container is running yet
+            # (first deploy: nothing to protect). A failed snapshot aborts the deploy.
+            if [ "${STACK_ENV}" = "production" ] && [ -f scripts/backup_cron.sh ] \
+                && [ -n "$(${COMPOSE} ps -q db 2>/dev/null || true)" ]; then
+              echo "    pre-migration snapshot"
+              bash scripts/backup_cron.sh
+            fi
+            ${COMPOSE} run --rm api alembic upgrade head
+            # Optional seed hook: runs only if the image ships scripts/seed_data.py.
+            ${COMPOSE} run --rm api sh -c '[ -f /app/scripts/seed_data.py ] && python /app/scripts/seed_data.py || echo "No seed script; skipping."'
+          else
+            # WORKCHOP: rollback to an older image. Its alembic does not know the database's
+            # newer revision, so `upgrade head` would fail ("Can't locate revision") and block
+            # the very rollback it is meant to allow. Migrations are forward-only: the schema
+            # stays as it is (docs/deployment/ROLLBACK.md).
+            echo "    run_migrations=false (rollback): skipping snapshot, alembic and seed; schema untouched"
+          fi
+
+          # WORKCHOP: remember each Celery container's id and restart counter BEFORE `up -d`.
+          # Docker only resets RestartCount when a container is recreated, so a re-run with the
+          # same image and .env leaves the old container in place; judging the absolute counter
+          # would fail every retry after one old restart. We fail only if it INCREASES, or the
+          # container is unhealthy / missing.
+          for svc in celery_worker celery_beat; do
+            old_cid="$(${COMPOSE} ps -q "${svc}" 2>/dev/null || true)"
+            old_rc=0
+            if [ -n "${old_cid}" ]; then
+              old_rc="$(docker inspect -f '{{.RestartCount}}' "${old_cid}" 2>/dev/null || echo 0)"
+            fi
+            printf -v "BASE_CID_${svc}" '%s' "${old_cid}"
+            printf -v "BASE_RC_${svc}" '%s' "${old_rc}"
+          done
+
+          echo "==> [${STACK_ENV}] 5/6 Starting the stack"
+          ${COMPOSE} up -d --remove-orphans
+
+          echo "==> [${STACK_ENV}] 6/6 Waiting for health: ${HEALTH_URL}"
+          READY=""
+          for _ in $(seq 1 24); do
+            if curl -fsS --max-time 5 "${HEALTH_URL}" >/dev/null 2>&1; then
+              READY=1; break
+            fi
+            sleep 5
+          done
+          if [ -z "${READY}" ]; then
+            echo "::error::[${STACK_ENV}] health check never returned 200 after about 2 minutes"
+            false   # triggers the ERR trap, which rolls back
+          fi
+
+          # WORKCHOP: the api answering is not enough. Worker and beat run payouts, withdrawal
+          # reconcile and auto-confirm; a crash-looping Celery (bad import, bad schedule) must
+          # fail the deploy, roll back, and never reach "staging-verified". Their compose
+          # healthchecks must turn healthy and the containers must not have restarted.
+          echo "==> [${STACK_ENV}] 6b/6 Waiting for celery_worker and celery_beat"
+          wait_healthy() {
+            local svc="$1" cid st rc base_cid_var base_rc_var base_rc
+            cid="$(${COMPOSE} ps -q "${svc}" 2>/dev/null || true)"
+            if [ -z "${cid}" ]; then echo "::error::[${STACK_ENV}] ${svc} has no container"; return 1; fi
+            # Baseline only applies to the SAME container; a recreated one starts from 0.
+            base_cid_var="BASE_CID_${svc}"; base_rc_var="BASE_RC_${svc}"
+            base_rc=0
+            if [ "${!base_cid_var:-}" = "${cid}" ]; then base_rc="${!base_rc_var:-0}"; fi
+            for _ in $(seq 1 60); do
+              st="$(docker inspect -f '{{.State.Health.Status}}' "${cid}" 2>/dev/null || echo none)"
+              rc="$(docker inspect -f '{{.RestartCount}}' "${cid}" 2>/dev/null || echo 0)"
+              if [ "${rc}" -gt "${base_rc}" ]; then
+                echo "::error::[${STACK_ENV}] ${svc} restarted $((rc - base_rc)) time(s) during this deploy: crash loop"; return 1
+              fi
+              if [ "${st}" = "healthy" ]; then echo "    ${svc} healthy"; return 0; fi
+              if [ "${st}" = "unhealthy" ]; then echo "::error::[${STACK_ENV}] ${svc} is unhealthy"; return 1; fi
+              sleep 5
+            done
+            echo "::error::[${STACK_ENV}] ${svc} not healthy after 5 minutes (status: ${st})"; return 1
+          }
+          wait_healthy celery_worker || false   # `false` triggers the ERR trap, which rolls back
+          wait_healthy celery_beat || false
+
+          trap - ERR
+          echo "==> [${STACK_ENV}] deployed successfully"
+
+          # Production only: daily backup cron (the script derives its directory from its own location).
+          if [ "${STACK_ENV}" = "production" ] && [ -f scripts/backup_cron.sh ]; then
+            chmod +x scripts/backup_cron.sh
+            mkdir -p backups
+            (crontab -l 2>/dev/null | grep -v "backup_cron.sh"; echo "0 2 * * * ${DEPLOY_PATH}/scripts/backup_cron.sh >> ${DEPLOY_PATH}/backups/backup.log 2>&1") | crontab -
+            echo "Backup cron installed: daily at 02:00"
+          fi
+
+          # Keep images from the last 72h so a manual rollback has them locally.
+          # WORKCHOP: scoped by label to OUR images only. The VPS is shared with other
+          # projects, and a bare `docker image prune -af` deletes every unused image on it.
+          docker image prune -af --filter "until=72h" \
+            --filter "label=org.opencontainers.image.source=https://github.com/innocent98/workshop-backend" || true
+
+    - name: Remove the decrypted .env from the runner
+      if: always()
+      shell: bash
+      run: rm -f .env

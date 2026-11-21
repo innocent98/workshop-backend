@@ -45,6 +45,10 @@ coverage.xml
 .env
 .env.local
 .env*
+# ...except the encrypted env files and the documented examples (never plaintext secrets)
+!.env.example
+!.env.*.example
+!.env.*.enc
 .venv
 env/
 venv/

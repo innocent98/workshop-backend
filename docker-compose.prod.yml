@@ -1,0 +1,188 @@
+# Workchop API: production / staging stack (the deployed one).
+#
+# Used by .github/actions/deploy-stack on the VPS:
+#   docker compose -f docker-compose.prod.yml --env-file .env up -d
+# Staging and production use THIS SAME file; only the decrypted .env differs
+# (.env.staging.enc / .env.production.enc, see docs/deployment/ENV_ENCRYPTION.md).
+#
+# Differences from docker-compose.yml (the dev stack):
+#   - the API image comes from the registry by digest (API_IMAGE, pinned by the deploy);
+#     nothing is built on the server and no source is bind-mounted
+#   - db / redis publish NO host ports; the API publishes only on 127.0.0.1 for nginx
+#   - migrations are NEVER run on container start (SKIP_MIGRATIONS=true); the deploy runs
+#     `alembic upgrade head` once, in a one-off container, before the stack is (re)started
+#   - celery worker AND celery beat run (the hourly withdrawal reconcile and the 24h
+#     auto-confirm are beat schedules: without beat they never fire)
+#   - container names are `${COMPOSE_PROJECT_NAME}_<service>` because scripts/backup_cron.sh
+#     and scripts/restore_db.sh address `${COMPOSE_PROJECT_NAME}_db`
+#
+# Required in .env (see .env.production.example): API_IMAGE (set by the deploy),
+# COMPOSE_PROJECT_NAME, API_PORT, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB,
+# FCM_SERVICE_ACCOUNT_FILE_HOST (no default on purpose: staging must never silently mount the
+# production service account).
+
+x-app-env: &app-env
+  env_file: .env
+  environment: &app-environment
+    # Never migrate on container start; the deploy action migrates once.
+    SKIP_MIGRATIONS: "true"
+    # Single source of truth for the DB/Redis connection: built from POSTGRES_* so the
+    # app and the database can never drift. Overrides any DATABASE_URL / REDIS_URL in .env.
+    # Use hex/alphanumeric passwords (openssl rand -hex 24): no URL-escaping needed.
+    DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+    REDIS_URL: redis://redis:6379/0
+    # Where the FCM service account is mounted (see volumes below).
+    FCM_SERVICE_ACCOUNT_FILE: /run/secrets/fcm-service-account.json
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  api:
+    image: ${API_IMAGE:?API_IMAGE is not set; the deploy pins it in .env}
+    container_name: ${COMPOSE_PROJECT_NAME:-workchop}_api
+    <<: *app-env
+    environment:
+      <<: *app-environment
+      # The API is only reachable through nginx on the same host, which overwrites
+      # X-Forwarded-For with the real client IP. Trusting it lets slowapi rate-limit per
+      # client instead of putting every user in the Docker gateway's bucket.
+      FORWARDED_ALLOW_IPS: "*"
+    # Bound to localhost: nginx on the host is the only way in.
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    volumes:
+      # Firebase service account JSON, placed on the host by the owner (never in git or the
+      # image). The file MUST exist before the first deploy or Docker creates a directory.
+      - ${FCM_SERVICE_ACCOUNT_FILE_HOST:?set FCM_SERVICE_ACCOUNT_FILE_HOST in .env (see .env.<env>.example)}:/run/secrets/fcm-service-account.json:ro
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 768M
+
+  celery_worker:
+    image: ${API_IMAGE:?API_IMAGE is not set; the deploy pins it in .env}
+    container_name: ${COMPOSE_PROJECT_NAME:-workchop}_worker
+    <<: *app-env
+    command: celery -A app.celery_app worker --loglevel=info --concurrency=2
+    volumes:
+      - ${FCM_SERVICE_ACCOUNT_FILE_HOST:?set FCM_SERVICE_ACCOUNT_FILE_HOST in .env (see .env.<env>.example)}:/run/secrets/fcm-service-account.json:ro
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      # Ping THIS worker only (a bare `inspect ping` waits on every worker).
+      test: ["CMD-SHELL", "celery -A app.celery_app inspect ping -d celery@$$HOSTNAME --timeout 10"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+      start_period: 40s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 768M
+
+  # Exactly ONE beat. Never scale this service: two beats double-fire every schedule
+  # (hourly withdrawal reconcile, auto-confirm after the dispute window, OTP cleanup).
+  celery_beat:
+    image: ${API_IMAGE:?API_IMAGE is not set; the deploy pins it in .env}
+    container_name: ${COMPOSE_PROJECT_NAME:-workchop}_beat
+    <<: *app-env
+    command: >
+      celery -A app.celery_app beat --loglevel=info
+      --pidfile=/tmp/celerybeat.pid --schedule=/tmp/celerybeat-schedule
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      # Healthy while the PID in the pidfile is alive.
+      test: ["CMD-SHELL", "kill -0 $$(cat /tmp/celerybeat.pid)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+
+  db:
+    # PostGIS: the models use Geography columns (migrations enable the extension).
+    image: postgis/postgis:15-3.4-alpine
+    container_name: ${COMPOSE_PROJECT_NAME:-workchop}_db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is not set}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is not set}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is not set}
+    # Modest tuning for a 2-4 GB VPS shared with the app; raise on a bigger box.
+    command: postgres -c shared_buffers=256MB -c effective_cache_size=768MB -c max_connections=100
+    volumes:
+      # Named volume: survives `down` and image updates. NEVER `down -v` in production.
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1G
+
+  redis:
+    image: redis:7-alpine
+    container_name: ${COMPOSE_PROJECT_NAME:-workchop}_redis
+    # Redis is the Celery broker AND result backend AND holds the token blacklist, OTP
+    # attempt counters and rate limits. `noeviction` (not the dev stack's allkeys-lru) so
+    # memory pressure produces an error instead of silently dropping queued tasks
+    # (withdrawals!) or revoked tokens. All app keys carry TTLs, so 256 MB is ample.
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy noeviction
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 320M
+
+volumes:
+  postgres_data:
+  redis_data:

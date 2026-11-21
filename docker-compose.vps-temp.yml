@@ -1,3 +1,5 @@
+# DEPRECATED (2026-11-21): override for the temporary 3-day VPS test (docs/VPS_TEMP_DEPLOY.md).
+# Superseded by docker-compose.prod.yml + the CD pipeline. Kept for reference until the temp stack is torn down.
 services:
   api:
     container_name: workchop-temp_api

@@ -33,13 +33,21 @@ RUN poetry install --only main --no-root
 # ============================================
 FROM python:3.11-slim AS runtime
 
+# The deploy pipeline passes the commit SHA (cd-staging.yml build-args); recorded as an
+# image label so `docker inspect` on the VPS shows which commit is running.
+ARG GIT_SHA=unknown
+LABEL org.opencontainers.image.revision=$GIT_SHA \
+      org.opencontainers.image.source="https://github.com/innocent98/workshop-backend"
+
 WORKDIR /app
 
-# Install only runtime dependencies (no build tools)
+# Install only runtime dependencies (no build tools). `apt-get upgrade` picks up fixed OS packages
+# published since the base image was built (the Trivy gate flagged zlib1g).
 RUN apt-get update && apt-get install -y \
     netcat-traditional \
     libpq5 \
     curl \
+    && apt-get upgrade -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
