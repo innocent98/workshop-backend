@@ -86,6 +86,9 @@ app = FastAPI(
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
     docs_url=f"{settings.API_V1_STR}/docs",
     redoc_url=f"{settings.API_V1_STR}/redoc",
+    # FastAPI >= 0.132 rejects JSON bodies sent without a JSON Content-Type by default;
+    # keep accepting them so existing mobile/HTTP clients behave exactly as before.
+    strict_content_type=False,
 )
 
 # Shared (Redis-backed) rate limiter state + custom error handler

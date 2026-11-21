@@ -1,5 +1,6 @@
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.security.utils import get_authorization_scheme_param
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
@@ -8,7 +9,29 @@ from app.core.token_blacklist import is_token_blacklisted
 from app.db.models.user import User
 from app.db.session import get_db
 
-security = HTTPBearer()
+
+class HTTPBearer403(HTTPBearer):
+    """
+    HTTPBearer that answers 403 for a missing or non-Bearer Authorization header.
+
+    FastAPI >= 0.122 changed the stock HTTPBearer to answer 401 here; this API has always
+    answered 403 (the mobile client may branch on it), so the original behaviour is kept.
+    """
+
+    async def __call__(self, request: Request) -> HTTPAuthorizationCredentials:
+        authorization = request.headers.get("Authorization")
+        scheme, credentials = get_authorization_scheme_param(authorization)
+        if not (authorization and scheme and credentials):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authenticated")
+        if scheme.lower() != "bearer":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Invalid authentication credentials",
+            )
+        return HTTPAuthorizationCredentials(scheme=scheme, credentials=credentials)
+
+
+security = HTTPBearer403()
 
 
 async def get_current_user(
