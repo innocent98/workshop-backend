@@ -1,7 +1,7 @@
 # SOP: Dependency security bump (clear fixable HIGH/CRITICAL CVEs from the Trivy image scan)
 
 **What shipped:** `pyproject.toml` + `poetry.lock` bumped so the Python dependencies carry no fixable HIGH or
-CRITICAL advisory, plus the two small code changes needed to keep the API behaving exactly as before.
+CRITICAL advisory, plus the two small code changes needed to keep the API behaving exactly as before, the Dockerfile `setuptools` upgrade, and Trivy switched back to blocking.
 **PR:** `fix/dependency-security-bump` → `main` (number in the PR). Not merged by the author.
 
 ## Why
@@ -39,14 +39,12 @@ Method: temporary exact pins for the transitive packages, `poetry lock`, then re
 2.2.1 keeps locked versions), so `pyproject.toml` only carries the four direct bumps. Resolved versions verified
 unchanged after the pins were removed.
 
-### Not fixable in `poetry.lock` (outside this PR's scope)
+### Base-image findings (fixed in the Dockerfile, not the lock)
 
-| Finding | Why | Action |
+| Finding | Why | Fix |
 |---|---|---|
-| `jaraco.context` 5.3.0 and `wheel` 0.45.1 (both HIGH) | both are **vendored inside `setuptools`** (79.0.1 in the base image, `setuptools/_vendor/...`), not in our lock; CI's Trivy scan of this PR's image shows exactly these two as the only remaining findings. The top-level `wheel` in the base image is already 0.46.3. setuptools >= 80.10.2 vendors jaraco.context 6.1.0 and wheel 0.46.3 | Dockerfile: `pip install --no-cache-dir -U "setuptools>=80.10.2"` in **both** stages (the runtime stage copies the builder's site-packages) |
-| `zlib1g` (HIGH, OS) | already handled by `apt-get upgrade` in the runtime stage | none |
-
-The Dockerfile belongs to the pipeline owner and was not touched here.
+| `jaraco.context` 5.3.0 and `wheel` 0.45.1 (both HIGH) | both are **vendored inside `setuptools`** (79.0.1 in the base image, `setuptools/_vendor/...`), not in our lock. CI's first Trivy scan of this PR reported exactly these two as the only remaining findings (`Total: 2`). setuptools >= 80.10.2 vendors jaraco.context 6.1.0 and wheel 0.46.3 | `RUN pip install --no-cache-dir -U "setuptools>=80.10.2"` in **both** Dockerfile stages. The runtime stage needs its own: its `COPY` from the builder only overlays files, so the base image's old vendored `*.dist-info` directories would otherwise survive |
+| `zlib1g` (HIGH, OS) | handled by `apt-get upgrade` in the runtime stage | none |
 
 ### Accepted: unfixed, no upstream release (Trivy hides these via `ignore-unfixed`)
 
@@ -54,6 +52,8 @@ The Dockerfile belongs to the pipeline owner and was not touched here.
 |---|---|---|
 | python-jose 3.5.0 (latest) | GHSA-3qf3-8w2g-rqmx CRITICAL: HS256 verification accepts a DER-encoded public key as the HMAC secret when `algorithms` is not restricted | Not exploitable here: `HS256` with `settings.SECRET_KEY` (a symmetric secret), and `jwt.decode(..., algorithms=[settings.ALGORITHM])` pins the algorithm. No public key is involved. `tests/test_dependency_upgrade_guards.py` asserts alg-none, other-secret and HS512 tokens are rejected. python-jose is unmaintained: moving to PyJWT (already installed) is the durable fix, see follow-ups |
 | ecdsa 0.19.1 | GHSA-wj6h Minerva timing attack (HIGH), no fix | transitive of python-jose; we sign and verify HS256 only, never ECDSA |
+
+Because Trivy runs with `ignore-unfixed: true`, these two are invisible to the blocking scan today. The moment upstream ships a fix they surface and fail `image-check`, which forces the bump (or the PyJWT migration below).
 
 ## Code changes (behaviour preservation)
 
@@ -76,9 +76,10 @@ Both found by comparing the old stack (fastapi 0.115 / starlette 0.38) with the 
 | Area | Files |
 |---|---|
 | Dependencies | `pyproject.toml` (fastapi, python-multipart, python-jose, pillow), `poetry.lock` (regenerated with Poetry 2.2.1) |
+| Dockerfile / CI | `Dockerfile` (setuptools upgrade, both stages), `.github/workflows/ci.yml` (Trivy `exit-code: '1'`, job renamed `Image builds (Trivy)`, TEMPORARY labels removed), `docs/sop/deploy-pipeline.md`, `docs/deployment/OWNER-SETUP-CHECKLIST.md`, `docs/deployment/CICD_PIPELINE.md` |
 | Code | `app/main.py` (`strict_content_type=False`), `app/api/deps.py` (`HTTPBearer403`) |
 | Tests | `tests/test_dependency_upgrade_guards.py` (17 characterization tests, below) |
-| Not touched | `.github/`, `Dockerfile`, migrations (no schema change), Pillow/jose/multipart call sites (no API they use was removed) |
+| Not touched | migrations (no schema change), Pillow/jose/multipart call sites (no API they use was removed) |
 
 Pillow 13 removals (`Image._show`, `Image.Image.get_child_images`, I-mode PNG save, `fromarray` mode) do not touch
 `app/utils/file_upload.py`, which uses `Image.open/new/convert/split/paste/thumbnail(Image.Resampling.LANCZOS)/save`.
@@ -123,9 +124,8 @@ picture upload (RGBA PNG, JPEG, palette GIF) resized to <= 1080 px and stored; c
 ## Operate / roll back
 
 - Deploy is the normal pipeline. No migration, no config or env change.
-- Roll back by reverting this PR (restores the previous lock). The two code changes are self-contained.
-- After merge: flip Trivy in `ci.yml` to `exit-code: '1'`, and apply the Dockerfile `setuptools` line above (Trivy
-  will still show the two vendored findings until then, so flipping it to blocking needs that line first).
+- Roll back by reverting this PR (restores the previous lock, Dockerfile and report-only Trivy). The two code changes are self-contained.
+- Trivy is blocking: a new fixable HIGH/CRITICAL in a dependency or base image now fails `image-check` and therefore the `CI gate`. Fix by bumping the package (or refreshing the base image); do not add a `.trivyignore` entry for something that has a fix.
 
 ## Follow-ups
 

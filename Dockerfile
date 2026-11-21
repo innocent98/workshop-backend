@@ -22,6 +22,10 @@ RUN curl -sSL https://install.python-poetry.org | python3 - && \
 ENV POETRY_VIRTUALENVS_CREATE=false \
     POETRY_NO_INTERACTION=1
 
+# The base image's setuptools vendors jaraco.context 5.3.0 and wheel 0.45.1 (HIGH CVEs, no
+# poetry.lock entry). setuptools >= 80.10.2 vendors the fixed versions.
+RUN pip install --no-cache-dir -U "setuptools>=80.10.2"
+
 # Copy dependency files
 COPY pyproject.toml poetry.lock ./
 
@@ -50,6 +54,10 @@ RUN apt-get update && apt-get install -y \
     && apt-get upgrade -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
+
+# Upgrade setuptools here too: the COPY below only overlays files, so the base image's old
+# vendored jaraco.context/wheel dist-info directories would survive otherwise.
+RUN pip install --no-cache-dir -U "setuptools>=80.10.2"
 
 # Copy installed Python packages from builder
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages

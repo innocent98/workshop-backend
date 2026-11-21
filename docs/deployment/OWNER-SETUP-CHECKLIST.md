@@ -296,7 +296,7 @@ Names are exactly what the workflows read (`grep -rhoE "(secrets|vars)\.[A-Za-z_
 
 ## 12. Production release **[P]**
 
-- [ ] **DO NOT deploy production until the dependency-security PR has merged and the Trivy step in `.github/workflows/ci.yml` is blocking again** (`exit-code: '1'`; today it is TEMPORARILY report-only). The image currently carries known fixable HIGH/CRITICAL vulnerabilities in Pillow (image uploads), python-jose/PyJWT (login tokens), anyio, starlette and others. Staging with test data is fine; real users and live keys are not. Full list: `docs/sop/deploy-pipeline.md` (Follow-ups). Ask for the status of that PR before you start this step.
+- [ ] The Trivy image scan in `.github/workflows/ci.yml` is blocking (`exit-code: '1'`) and green on the commit you are about to promote. The dependency-security fixes (PR #12) are what made that possible; accepted unfixed findings are listed in `docs/sop/dependency-security-bump.md`.
 
 - [ ] Steps 5 (`production` environment), 6 (production secrets/variables), 7 (`.env.production.enc` with **live** keys) and 8 (prod nginx + TLS, FCM file) are done.
 - [ ] **Snapshot before the migration.** The production deploy takes a database snapshot automatically before `alembic upgrade head` whenever a database already exists (`backups/` on the VPS). A manual rollback (`image_tag`) skips migrations and the snapshot by design (`docs/deployment/ROLLBACK.md`). This release carries migration `a4c8e2f6b1d9` (review-moderation columns + a response-time backfill in one transaction). On the **very first** production deploy there is no database yet, so there is nothing to protect.
