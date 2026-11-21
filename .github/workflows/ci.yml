@@ -243,7 +243,7 @@ jobs:
           fi
 
   image-check:
-    name: Image builds (Trivy report-only, TEMPORARY)
+    name: Image builds (Trivy)
     # PRs only. A push to develop is followed by cd-staging.yml, which builds the real
     # image and fails before deploying if the build is broken.
     if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
@@ -266,21 +266,14 @@ jobs:
 
       # Scans the finished image, so it sees OS packages too. CVEs with no released fix
       # are ignored (nothing can be upgraded); list accepted exceptions in a
-      # .trivyignore file at the repo root.
-      #
-      # TEMPORARY, REPORT-ONLY (exit-code 0): the first scan found fixable HIGH/CRITICAL CVEs
-      # in the Python dependencies (pillow, python-jose, PyJWT, anyio, starlette, ...). Fixing
-      # them is a separate dependency-security PR that owns pyproject.toml / poetry.lock.
-      # FLIP BACK to `exit-code: '1'` as soon as that PR has merged (tracked in
-      # docs/sop/deploy-pipeline.md, the owner checklist and the master checklist).
-      # The table below is still printed on every PR run; the build itself stays a hard check.
-      - name: Trivy image scan (report-only until the dependency PR merges)
+      # .trivyignore file at the repo root. Any fixable HIGH/CRITICAL fails the job.
+      - name: Trivy image scan
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: workchop-api:ci
           severity: HIGH,CRITICAL
           ignore-unfixed: true
-          exit-code: '0'
+          exit-code: '1'
 
   # The one check that always reports. Jobs above are legitimately skipped on a
   # docs-only PR; require THIS check on `develop` (and on `main` if PRs target it),
