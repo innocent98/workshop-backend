@@ -68,7 +68,7 @@ Both found by comparing the old stack (fastapi 0.115 / starlette 0.38) with the 
 
 | Change | Source | Effect |
 |---|---|---|
-| Empty-string `Form` values are treated as missing | FastAPI 0.123.2 | `bio=""` on `/auth/register/profile` and `title`/`description=""` on portfolio now arrive as `None` (stored NULL, was `""`). `display_order=""` becomes `0`. A required `Form(...)` sent as `""` is now 422 "Field required" instead of reaching the handler: `POST /bookings/{id}/progress-logs` with an empty `description` returns 422 (was 400 "at least 5 characters"). An empty optional file part is now accepted (was 422). |
+| Empty-string `Form` values are treated as missing | FastAPI 0.123.2 | A blank portfolio `title` or `description` is now stored as NULL instead of `""` (the client already shows "Untitled project"; harmless). `bio` is unaffected: the Flutter app never sends it and `if bio:` in `app/services/auth.py` already ignored `""`. `display_order=""` becomes `0`. A required `Form(...)` sent as `""` is now 422 "Field required" instead of reaching the handler: `POST /bookings/{id}/progress-logs` with an empty `description` returns 422 (was 400 "at least 5 characters"). An empty optional file part is now accepted (was 422). |
 | OpenAPI schema | FastAPI 0.129 / 0.13x | `UploadFile` is now `contentMediaType: application/octet-stream` instead of `format: binary`; `ValidationError` schema lists `ctx` and `input`. Paths (88) and schemas (126) are unchanged in count. Docs only: runtime 422 bodies already carried `input`/`ctx`. |
 
 ## What's involved
@@ -114,8 +114,9 @@ picture upload (RGBA PNG, JPEG, palette GIF) resized to <= 1080 px and stored; c
 
 ## Not verified (honest gaps)
 
-- Google sign-in (`firebase_admin` token verification) needs a Firebase service account: only the imports were
-  exercised (PyJWT 2.15 and cryptography 50 under firebase-admin 6.6.0 are unproven at runtime).
+- Google sign-in end to end (needs a Firebase service account and a real Google ID token). `firebase_admin` 6.6 verifies
+  ID tokens with google-auth (unchanged), not PyJWT. The only new element is cryptography 50: a probe verified an
+  RS256/x509 token on it, but a real Google sign-in has not been tested.
 - Cloudinary upload path (needs credentials): only the local-storage branch ran. Pillow output is the same bytes either way.
 - Celery worker/beat boot and real task execution on the new stack (imports only).
 - Real email rendering through `emails`/`premailer` with lxml 6.1.0.
@@ -132,6 +133,12 @@ picture upload (RGBA PNG, JPEG, palette GIF) resized to <= 1080 px and stored; c
 - Replace python-jose with PyJWT in `app/core/security.py` and `app/api/deps.py` (two call sites, PyJWT already
   installed): removes the unfixable CRITICAL advisory and the unmaintained dependency. Needs its own PR and a
   decision on token `exp` handling (`datetime.utcnow()` is deprecated).
+- Token header parsing mismatch (pre-existing, not changed here): logout (`app/api/v1/endpoints/auth.py` ~688) and
+  account delete (~619) only find the token when the header starts with exactly `Bearer `, while the auth check
+  accepts any case. A request sent as `bearer <token>` authenticates but logout does not revoke it. Fix later by
+  using `credentials.credentials` from the security dependency.
+- Starlette 1.3's `TestClient` emits an httpx deprecation warning in the test run; harmless now, track before the
+  next httpx/starlette bump.
 - Decide whether to keep `strict_content_type=False` once all clients send `Content-Type: application/json`.
 - Consider a Dependabot/`pip-audit` gate so the next advisory is caught outside the image scan.
 - Remaining MODERATE advisories (idna, requests, python-dotenv, ecdsa DoS, mako on Windows) are out of this PR's scope.
