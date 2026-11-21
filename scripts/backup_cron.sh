@@ -21,7 +21,8 @@ set -uo pipefail
 umask 077
 
 # ---- Configuration ----
-DEPLOY_DIR="/opt/workchop"
+# Derived from this script's own location (<deploy dir>/scripts/), so it follows DEPLOY_PATH.
+DEPLOY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BACKUP_DIR="${DEPLOY_DIR}/backups"
 ENV_FILE="${DEPLOY_DIR}/.env"
 DOCKER="$(command -v docker || echo /usr/bin/docker)"
@@ -76,7 +77,11 @@ else
 fi
 
 # ---- Compress ----
-gzip "${BACKUP_DIR}/${BACKUP_FILE}"
+if ! gzip "${BACKUP_DIR}/${BACKUP_FILE}"; then
+    echo "[$(date -u +%FT%TZ)] ERROR: gzip failed"
+    rm -f "${BACKUP_DIR}/${BACKUP_FILE}" "${BACKUP_DIR}/${BACKUP_FILE}.gz"
+    exit 1
+fi
 BACKUP_SIZE=$(du -h "${BACKUP_DIR}/${BACKUP_FILE}.gz" | cut -f1)
 echo "[$(date -u +%FT%TZ)] Compressed: ${BACKUP_FILE}.gz (${BACKUP_SIZE})"
 

@@ -153,6 +153,9 @@ jobs:
           env_encryption_key: ${{ secrets.ENV_ENCRYPTION_KEY }}
           ghcr_username: ${{ github.actor }}
           ghcr_token: ${{ secrets.GITHUB_TOKEN }}
+          # An image_tag dispatch is a rollback: skip alembic (the older image does not know the
+          # database's newer revision). Migrations are forward-only; see docs/deployment/ROLLBACK.md.
+          run_migrations: ${{ github.event.inputs.image_tag == '' && 'true' || 'false' }}
 
   staging-e2e:
     name: Live E2E against staging
@@ -232,9 +235,43 @@ jobs:
     permissions:
       contents: read
       packages: write
+      checks: read   # to read the `CI gate` result for this commit
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # WORKCHOP: "verified" must also mean "CI passed for this exact commit". CI (ci.yml) runs on
+      # the same push to develop in parallel with this workflow, and the smoke suite is only a
+      # handful of read-only checks, so a commit with red tests could otherwise be deployed to
+      # staging, stamped verified and fast-forwarded to production. Wait for the `CI gate` check
+      # run on this SHA; fail closed if it fails or never appears (re-run this workflow once CI is
+      # green). Fine for the first run too: creating `develop` is itself a push that starts CI.
+      - name: Require a green CI gate for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 60); do   # up to 30 minutes
+            RUNS="$(gh api "repos/${REPO}/commits/${SHA}/check-runs?per_page=100" \
+              --jq '[.check_runs[] | select(.name == "CI gate")] | map({status, conclusion})')"
+            N="$(echo "${RUNS}" | jq 'length')"
+            BAD="$(echo "${RUNS}" | jq '[.[] | select(.status == "completed" and .conclusion != "success")] | length')"
+            PENDING="$(echo "${RUNS}" | jq '[.[] | select(.status != "completed")] | length')"
+            if [ "${BAD}" -gt 0 ]; then
+              echo "::error title=CI gate is red::CI gate did not pass for ${SHA}. Not marking this image verified. Fix CI, push, and let a new run verify the new commit."
+              exit 1
+            fi
+            if [ "${N}" -gt 0 ] && [ "${PENDING}" -eq 0 ]; then
+              echo "CI gate passed for ${SHA}"
+              exit 0
+            fi
+            echo "Waiting for CI gate on ${SHA} (found ${N}, pending ${PENDING}) [${i}/60]"
+            sleep 30
+          done
+          echo "::error title=No CI gate result::No finished 'CI gate' check run for ${SHA} within 30 minutes. Not marking this image verified. Re-run this workflow once CI has finished."
+          exit 1
 
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 

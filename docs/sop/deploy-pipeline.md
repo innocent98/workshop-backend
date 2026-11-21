@@ -29,10 +29,14 @@ launch, so the pipeline had to land as one reviewable unit with an explicit list
 | DB/Redis URLs | built in the compose file from `POSTGRES_*` | duplicating the password in `DATABASE_URL` (drift) |
 | Redis policy | `noeviction`, 256 MB | dev stack's `allkeys-lru`: Redis is also the Celery broker, eviction would silently drop queued withdrawals and revoked tokens |
 | Proxy headers | nginx **overwrites** `X-Forwarded-For`; uvicorn trusts it (`FORWARDED_ALLOW_IPS=*`, port bound to localhost) | default uvicorn (all users share the Docker gateway IP → one rate-limit bucket) or appending (spoofable → login limits dodged) |
+| Rollback | automatic rollback restores `api`, `celery_worker` **and** `celery_beat`; `image_tag` (manual) dispatches skip migrations (`run_migrations: false`) | always running `alembic upgrade head`: an older image cannot find the newer revision, so a rollback across a migration (the commonest reason to roll back) would fail |
+| Health gate | api health **plus** worker and beat `healthy` without restarts before a deploy counts as good or can be verified | api-only check (a crash-looping Celery would be promoted; payouts and auto-confirm would silently stop) |
+| "Verified" | `mark-verified` also requires the commit's `CI gate` check to be green (waits up to 30 min, fails closed) | build+deploy+smoke only (7 read-only checks are not a substitute for the test suite) |
+| Hosts | two VPSs and two SSH keys by default; single VPS documented as an accepted risk with `develop` locked down | one host, one `deploy` user, one key in both Environments: the docker group is root-equivalent, so whoever controls `develop` could read production's `.env` and database |
 | Pre-migration snapshot | production deploy runs `backup_cron.sh` before `alembic upgrade head` when a DB exists; a failure aborts | relying on the 02:00 cron (up to 24 h stale) |
 | Image prune | scoped to this repo's `org.opencontainers.image.source` label | template's bare `prune -af` (the VPS is shared; it would delete other projects' unused images) |
 | Live E2E | read-only smoke: health ×2, services list, protected route anonymous, unknown-account login, both webhooks reject unsigned requests | register → login (login requires the e-mail OTP; registration would leave junk rows on every deploy) |
-| Env files | `.env.<env>.enc` committed (AES-256, `scripts/env.sh`, **one key per environment**: staging deploys from the looser `develop` branch, so a shared key would let staging decrypt production); `.env.*.example` list every variable; no plaintext ever | server-side hand-edited `.env` (unauditable) |
+| Env files (keys) | `.env.<env>.enc` committed (AES-256, `scripts/env.sh`, **one key per environment and no shared fallback in the script**: staging deploys from the looser `develop` branch, so a shared key would let staging decrypt production); `.env.*.example` list every variable; no plaintext ever | server-side hand-edited `.env` (unauditable) |
 
 ## What's involved
 
@@ -68,6 +72,14 @@ Paystack `POST /api/v1/payments/webhook`, Dojah `POST /api/v1/verification/webho
 - Manual rollback: Actions → CD (production) → Run workflow, `image_tag=<an earlier verified sha-xxxxxxx>` (`docs/deployment/ROLLBACK.md`). If a bad migration corrupted data: restore the pre-migration snapshot (`restore_db.sh`) and deploy the previous image.
 - Expected one-off noise: merging the pipeline PR to `main` triggers **CD (production)**, which fails with "No image for this commit" before reaching any secret.
 - First release when `develop == main`: the fast-forward is a no-op, so run `gh workflow run "CD (production)" --ref main -f image_tag=sha-<7>`.
+
+## Security notes (Opus review of this PR)
+
+- **Accepted-risk option:** a single shared VPS lets anyone who can change what runs on `develop` (push, or edit `cd-staging.yml`) reach production through the docker group. The owner checklist makes two hosts the default; the single-host path states the risk and requires `develop` protected like `main`, a required reviewer on the `production` Environment and no collaborators with write access. Separate OS users on one Docker daemon are hygiene, not isolation.
+- Promotion proof is a registry tag (template design, see `CICD_PIPELINE.md` "Trust boundary"); signed attestations would harden it and are a follow-up.
+- Staging never mounts the production Firebase service account (own path, `{}` while FCM is disabled).
+- `backup_cron.sh` derives its directory from its own location (follows `DEPLOY_PATH`) and aborts on a failed `gzip`.
+- Floating `postgis`/`redis` image tags are re-pulled each deploy (`compose pull db redis`); pin them before launch to avoid a recreate mid-deploy.
 
 ## Follow-ups
 

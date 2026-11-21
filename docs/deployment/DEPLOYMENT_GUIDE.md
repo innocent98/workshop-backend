@@ -31,7 +31,7 @@ internet → nginx (80/443, TLS) → 127.0.0.1:${API_PORT} → api ─┬→ db 
 
 Layout on the VPS (`DEPLOY_PATH`: `/opt/workchop` production, `/opt/workchop-staging` staging). The pipeline writes
 `.env`, `docker-compose.prod.yml` and a few scripts there; there is no git clone on the server.
-`/opt/workchop/secrets/fcm-service-account.json` (Firebase) is placed by hand and shared by both stacks.
+`<DEPLOY_PATH>/secrets/fcm-service-account.json` (Firebase) is placed by hand: production uses the production service account; staging has its own file (a `{}` placeholder while `FCM_ENABLED=false`) and must never use the production one.
 
 ## Migrations: only in the deploy
 

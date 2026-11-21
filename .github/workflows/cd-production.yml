@@ -156,6 +156,9 @@ jobs:
           env_encryption_key: ${{ secrets.ENV_ENCRYPTION_KEY }}
           ghcr_username: ${{ github.actor }}
           ghcr_token: ${{ secrets.GITHUB_TOKEN }}
+          # An image_tag dispatch is a rollback: skip alembic (the older image does not know the
+          # database's newer revision). Migrations are forward-only; see docs/deployment/ROLLBACK.md.
+          run_migrations: ${{ github.event.inputs.image_tag == '' && 'true' || 'false' }}
 
       - name: Summary
         if: always()

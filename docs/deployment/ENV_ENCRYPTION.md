@@ -35,13 +35,15 @@ Commands:
 
 ### Key discovery
 
-`env.sh` looks for the encryption key in three places, in order:
+`env.sh` needs a **per-environment** key and has **no shared fallback**. For `<env>` it looks, in order, at:
 
-1. `$ENV_ENCRYPTION_KEY` env variable.
-2. `.env.key` file in the repo root (gitignored).
-3. Interactive prompt (fallback).
+1. `$ENV_ENCRYPTION_KEY_STAGING` / `$ENV_ENCRYPTION_KEY_PRODUCTION` env variable.
+2. `.env.<env>.key` file in the repo root (gitignored).
+3. Interactive prompt.
 
-Most day-to-day use: put the key in `.env.key` once, and every command Just Works.
+It prints which source it used. A bare `$ENV_ENCRYPTION_KEY` or `.env.key` is deliberately ignored: otherwise a leftover staging key in your shell could silently encrypt the production file, and the repository would then hold a production env that staging-key holders can decrypt.
+
+Most day-to-day use: put each key in its `.env.<env>.key` once (`chmod 600`), and every command just works.
 
 ## First-time setup
 

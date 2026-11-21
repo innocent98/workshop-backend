@@ -16,23 +16,21 @@
 #   ./scripts/env.sh diff                   # show which vars differ between envs
 #   ./scripts/env.sh generate-key           # generate a new encryption key
 #
-# The encryption key is read from (in order):
-#   1. ENV_ENCRYPTION_KEY environment variable
-#   2. .env.key file (gitignored)
+# WORKCHOP: one key PER environment, NO shared fallback. Staging deploys from `develop`, a branch
+# with looser controls than `main`; a key that also opened production would defeat the split, and a
+# stray exported ENV_ENCRYPTION_KEY must never silently encrypt production with the staging key.
+# The key for <env> is read from (in order):
+#   1. $ENV_ENCRYPTION_KEY_STAGING / $ENV_ENCRYPTION_KEY_PRODUCTION environment variable
+#   2. .env.<env>.key file in the repo root (gitignored)
 #   3. Interactive prompt
-#
-# WORKCHOP: one key PER environment (generate two). Staging deploys from `develop`, a branch with
-# looser controls than `main`; a shared key would let a staging compromise decrypt production.
-# Per-environment lookup order: $ENV_ENCRYPTION_KEY_STAGING / _PRODUCTION, then $ENV_ENCRYPTION_KEY,
-# then .env.<env>.key, then .env.key, then a prompt. In GitHub, the secret is named ENV_ENCRYPTION_KEY
-# in BOTH Environments, with a different value in each.
+# The source used is printed to stderr. In GitHub the secret is named ENV_ENCRYPTION_KEY in each
+# Environment, with that environment's own value.
 # ============================================================
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-KEY_FILE="$PROJECT_ROOT/.env.key"
 
 # Colors
 RED='\033[0;31m'
@@ -56,27 +54,22 @@ env_file() { echo "$PROJECT_ROOT/.env.$1"; }
 enc_file() { echo "$PROJECT_ROOT/.env.$1.enc"; }
 
 get_key() {
-    local env_name="${1:-}" upper
+    local env_name="${1:-}" upper var
+    [ -n "$env_name" ] || { echo -e "${RED}Internal error: get_key needs an environment.${NC}" >&2; exit 1; }
     upper=$(echo "$env_name" | tr '[:lower:]' '[:upper:]')
-    local var="ENV_ENCRYPTION_KEY_${upper}"
-    if [ -n "$env_name" ] && [ -n "${!var:-}" ]; then
+    var="ENV_ENCRYPTION_KEY_${upper}"
+    if [ -n "${!var:-}" ]; then
+        echo -e "${CYAN}key source: \$${var}${NC}" >&2
         echo "${!var}"
         return
     fi
-    if [ -n "$env_name" ] && [ -f "$PROJECT_ROOT/.env.${env_name}.key" ]; then
+    if [ -f "$PROJECT_ROOT/.env.${env_name}.key" ]; then
+        echo -e "${CYAN}key source: .env.${env_name}.key${NC}" >&2
         cat "$PROJECT_ROOT/.env.${env_name}.key"
         return
     fi
-    if [ -n "${ENV_ENCRYPTION_KEY:-}" ]; then
-        echo "$ENV_ENCRYPTION_KEY"
-        return
-    fi
-    if [ -f "$KEY_FILE" ]; then
-        cat "$KEY_FILE"
-        return
-    fi
-    echo -e "${YELLOW}No ENV_ENCRYPTION_KEY found in environment or .env.key file.${NC}" >&2
-    read -rsp "Enter encryption key: " key
+    echo -e "${YELLOW}No \$${var} and no .env.${env_name}.key; there is deliberately no shared fallback.${NC}" >&2
+    read -rsp "Enter the $env_name encryption key: " key
     echo >&2
     echo "$key"
 }
@@ -285,11 +278,12 @@ case "${1:-help}" in
         echo "  .env.production.enc   Encrypted production secrets (safe in git)"
         echo "  .env.staging          Decrypted staging (gitignored)"
         echo "  .env.production       Decrypted production (gitignored)"
-        echo "  .env.key              Local encryption key (gitignored)"
+        echo "  .env.staging.key      Staging encryption key (gitignored)"
+        echo "  .env.production.key   Production encryption key (gitignored)"
         echo ""
-        echo "The encryption key is read from (in order):"
-        echo "  1. ENV_ENCRYPTION_KEY environment variable"
-        echo "  2. .env.key file"
+        echo "The key for <env> is read from (in order; no shared fallback):"
+        echo "  1. ENV_ENCRYPTION_KEY_<STAGING|PRODUCTION> environment variable"
+        echo "  2. .env.<env>.key file"
         echo "  3. Interactive prompt"
         ;;
 esac

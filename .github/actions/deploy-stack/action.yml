@@ -45,6 +45,14 @@ inputs:
     description: "Health endpoint path."
     required: false
     default: "/api/v1/health"
+  run_migrations:
+    description: >-
+      "true" (default) runs the pre-migration snapshot and `alembic upgrade head`. Callers pass
+      "false" for a rollback to an older image (image_tag dispatch): that image's alembic does not
+      know the database's newer revision, so `upgrade head` would fail and block the rollback.
+      Migrations are forward-only; a rollback restores CODE, never the schema.
+    required: false
+    default: "true"
   default_api_port:
     description: "Port to probe if the stack's .env has no API_PORT."
     required: false
@@ -146,6 +154,7 @@ runs:
         STACK_ENV: ${{ inputs.environment }}
         HEALTH_PATH: ${{ inputs.health_path }}
         DEFAULT_API_PORT: ${{ inputs.default_api_port }}
+        RUN_MIGRATIONS: ${{ inputs.run_migrations }}
       with:
         host: ${{ inputs.vps_host }}
         username: ${{ inputs.vps_username }}
@@ -154,7 +163,7 @@ runs:
         port: ${{ inputs.vps_port }}
         # Passed as environment variables, not interpolated into the script, so
         # the GHCR token never appears in the command text.
-        envs: IMAGE_REF,DEPLOY_PATH,GHCR_USER,GHCR_TOKEN,STACK_ENV,HEALTH_PATH,DEFAULT_API_PORT
+        envs: IMAGE_REF,DEPLOY_PATH,GHCR_USER,GHCR_TOKEN,STACK_ENV,HEALTH_PATH,DEFAULT_API_PORT,RUN_MIGRATIONS
         command_timeout: 15m
         script: |
           set -euo pipefail
@@ -195,7 +204,9 @@ runs:
               # --no-deps: otherwise compose re-runs dependencies on the old
               # image. The schema is already at the new head, so this rolls back
               # code only. Keep migrations backward-compatible for one release.
-              ${COMPOSE} up -d --no-deps api
+              # WORKCHOP: worker and beat run the same image and move money
+              # (payout reconcile, auto-confirm), so they roll back with the api.
+              ${COMPOSE} up -d --no-deps api celery_worker celery_beat
               for _ in $(seq 1 20); do
                 if curl -fsS --max-time 5 "${HEALTH_URL}" >/dev/null 2>&1; then
                   echo "    rollback healthy"; break
@@ -203,26 +214,34 @@ runs:
                 sleep 3
               done
             fi
-            ${COMPOSE} logs --tail=80 api || true
+            ${COMPOSE} logs --tail=80 api celery_worker celery_beat || true
             exit 1
           }
           trap rollback ERR
 
           echo "==> [${STACK_ENV}] 4/6 Migrations"
-          # WORKCHOP: snapshot the production database before migrating. Migrations can
-          # backfill data inside one transaction (e.g. a4c8e2f6b1d9) and a snapshot is the
-          # only way back from a bad one. Skipped when no db container is running yet
-          # (first deploy: nothing to protect). A failed snapshot aborts the deploy.
-          if [ "${STACK_ENV}" = "production" ] && [ -f scripts/backup_cron.sh ] \
-              && [ -n "$(${COMPOSE} ps -q db 2>/dev/null || true)" ]; then
-            echo "    pre-migration snapshot"
-            bash scripts/backup_cron.sh
-          fi
           # Refresh third-party images if the stack has them (the API image is already pulled).
           ${COMPOSE} pull db redis 2>/dev/null || true
-          ${COMPOSE} run --rm api alembic upgrade head
-          # Optional seed hook: runs only if the image ships scripts/seed_data.py.
-          ${COMPOSE} run --rm api sh -c '[ -f /app/scripts/seed_data.py ] && python /app/scripts/seed_data.py || echo "No seed script; skipping."'
+          if [ "${RUN_MIGRATIONS}" = "true" ]; then
+            # WORKCHOP: snapshot the production database before migrating. Migrations can
+            # backfill data inside one transaction (e.g. a4c8e2f6b1d9) and a snapshot is the
+            # only way back from a bad one. Skipped when no db container is running yet
+            # (first deploy: nothing to protect). A failed snapshot aborts the deploy.
+            if [ "${STACK_ENV}" = "production" ] && [ -f scripts/backup_cron.sh ] \
+                && [ -n "$(${COMPOSE} ps -q db 2>/dev/null || true)" ]; then
+              echo "    pre-migration snapshot"
+              bash scripts/backup_cron.sh
+            fi
+            ${COMPOSE} run --rm api alembic upgrade head
+            # Optional seed hook: runs only if the image ships scripts/seed_data.py.
+            ${COMPOSE} run --rm api sh -c '[ -f /app/scripts/seed_data.py ] && python /app/scripts/seed_data.py || echo "No seed script; skipping."'
+          else
+            # WORKCHOP: rollback to an older image. Its alembic does not know the database's
+            # newer revision, so `upgrade head` would fail ("Can't locate revision") and block
+            # the very rollback it is meant to allow. Migrations are forward-only: the schema
+            # stays as it is (docs/deployment/ROLLBACK.md).
+            echo "    run_migrations=false (rollback): skipping snapshot, alembic and seed; schema untouched"
+          fi
 
           echo "==> [${STACK_ENV}] 5/6 Starting the stack"
           ${COMPOSE} up -d --remove-orphans
@@ -239,11 +258,35 @@ runs:
             echo "::error::[${STACK_ENV}] health check never returned 200 after about 2 minutes"
             false   # triggers the ERR trap, which rolls back
           fi
+
+          # WORKCHOP: the api answering is not enough. Worker and beat run payouts, withdrawal
+          # reconcile and auto-confirm; a crash-looping Celery (bad import, bad schedule) must
+          # fail the deploy, roll back, and never reach "staging-verified". Their compose
+          # healthchecks must turn healthy and the containers must not have restarted.
+          echo "==> [${STACK_ENV}] 6b/6 Waiting for celery_worker and celery_beat"
+          wait_healthy() {
+            local svc="$1" cid st rc
+            cid="$(${COMPOSE} ps -q "${svc}" 2>/dev/null || true)"
+            if [ -z "${cid}" ]; then echo "::error::[${STACK_ENV}] ${svc} has no container"; return 1; fi
+            for _ in $(seq 1 60); do
+              st="$(docker inspect -f '{{.State.Health.Status}}' "${cid}" 2>/dev/null || echo none)"
+              rc="$(docker inspect -f '{{.RestartCount}}' "${cid}" 2>/dev/null || echo 0)"
+              if [ "${rc}" -gt 0 ]; then
+                echo "::error::[${STACK_ENV}] ${svc} restarted ${rc} time(s): crash loop"; return 1
+              fi
+              if [ "${st}" = "healthy" ]; then echo "    ${svc} healthy"; return 0; fi
+              if [ "${st}" = "unhealthy" ]; then echo "::error::[${STACK_ENV}] ${svc} is unhealthy"; return 1; fi
+              sleep 5
+            done
+            echo "::error::[${STACK_ENV}] ${svc} not healthy after 5 minutes (status: ${st})"; return 1
+          }
+          wait_healthy celery_worker || false   # `false` triggers the ERR trap, which rolls back
+          wait_healthy celery_beat || false
+
           trap - ERR
           echo "==> [${STACK_ENV}] deployed successfully"
 
-          # Production only: daily backup cron (the script has the production
-          # path baked in).
+          # Production only: daily backup cron (the script derives its directory from its own location).
           if [ "${STACK_ENV}" = "production" ] && [ -f scripts/backup_cron.sh ]; then
             chmod +x scripts/backup_cron.sh
             mkdir -p backups

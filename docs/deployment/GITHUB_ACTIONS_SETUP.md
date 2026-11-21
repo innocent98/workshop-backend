@@ -16,9 +16,11 @@ How they fit together: `CICD_PIPELINE.md`. How to release: `BRANCHING.md`.
 ### Step 1. SSH keypair for GitHub Actions → VPS
 
 ```bash
-ssh-keygen -t ed25519 -f ~/.ssh/workchop_deploy -C "gha-workchop"
-ssh-copy-id -i ~/.ssh/workchop_deploy.pub <user>@<vps-host>
-ssh -i ~/.ssh/workchop_deploy <user>@<vps-host> 'echo ok'
+# one keypair per environment (see OWNER-SETUP-CHECKLIST.md step 3)
+ssh-keygen -t ed25519 -f ~/.ssh/workchop_deploy_staging -C "gha-workchop-staging"
+ssh-copy-id -i ~/.ssh/workchop_deploy_staging.pub <user>@<staging-host>
+ssh-keygen -t ed25519 -f ~/.ssh/workchop_deploy_prod -C "gha-workchop-prod"
+ssh-copy-id -i ~/.ssh/workchop_deploy_prod.pub <user>@<prod-host>
 ```
 
 No passphrase is simplest. If you set one, add it as `VPS_SSH_PASSPHRASE`.
@@ -42,12 +44,12 @@ Add to **both** environments (values differ):
 
 | Secret | Staging | Production |
 |---|---|---|
-| `VPS_HOST` | `vps.example.com` | same host, or another |
+| `VPS_HOST` | the **staging** host | the **production** host (a separate VPS by default; see the owner checklist, step 1) |
 | `VPS_USERNAME` | `deploy` (in the `docker` group) | same |
-| `VPS_SSH_KEY` | contents of `~/.ssh/workchop_deploy` (the private key) | same |
+| `VPS_SSH_KEY` | contents of `~/.ssh/workchop_deploy_staging` | contents of `~/.ssh/workchop_deploy_prod` (**a different key**: a staging key must never open production) |
 | `VPS_SSH_PASSPHRASE` | only if the key has one | same |
 | `DEPLOY_PATH` | `/opt/workchop-staging` | `/opt/workchop` |
-| `ENV_ENCRYPTION_KEY` | passphrase for `.env.staging.enc` | passphrase for `.env.production.enc` |
+| `ENV_ENCRYPTION_KEY` | key for `.env.staging.enc` | a **different** key for `.env.production.enc` |
 
 | Variable (not secret) | Staging | Production |
 |---|---|---|

@@ -29,11 +29,14 @@ from memory of those dashboards and can drift; the exact URLs/values come from t
 
 ## 1. VPS **[S]**
 
-Recommendation: a **dedicated** VPS for Workchop (production isolation from your other projects). Staging and production can share it (separate directories, ports and compose projects are already designed for that).
+**Default path: TWO hosts**: a production VPS and a small separate staging VPS, each with its own `deploy` user and its own SSH key (step 3). Why: the `deploy` user must be in the `docker` group, which is root-equivalent on that machine. Staging deploys from `develop`, a branch with looser controls than `main`. If staging and production share one host, anyone who can push to `develop` (or edit `cd-staging.yml`) gets the staging SSH key and can read production's plaintext `.env` (Paystack live secret, database password, JWT key) or open a shell in the production database. Two hosts remove that path; the per-environment encryption keys only matter once they do. Wherever a command below says `<VPS IP>`, use the host of the environment you are working on (`<STAGING IP>` or `<PROD IP>`).
+
+> **Single-VPS option (accepted risk: read this).** If you share one host for now, you are accepting that *anyone who can change what runs on `develop` can take over production*. Only do it with all of: (1) `develop` protected exactly like `main` plus review (the stricter command in step 4), no collaborators with write access, `enforce_admins: true`; (2) the `production` Environment keeps a **required reviewer** (step 5) and your own 2FA on GitHub; (3) separate OS users per environment **as hygiene, not isolation**: on one Docker daemon a `docker`-group user is root, so this does not stop the attack above. Commands: `adduser --disabled-password --gecos "" deploy-staging && adduser --disabled-password --gecos "" deploy-prod`, give each its own `~/.ssh/authorized_keys` with its own key, `chown -R deploy-staging /opt/workchop-staging`, `chown -R deploy-prod /opt/workchop`, add both to the `docker` group, and set `VPS_USERNAME` to `deploy-staging` / `deploy-prod` per Environment. For real isolation on one host you would need rootless Docker per user (`dockerd-rootless-setuptool.sh install` as each user; untested with this stack). Plan to move staging to its own small VPS before real users arrive.
 
 - [ ] Create the VPS: any provider (Hetzner, DigitalOcean, Contabo, Vultr…), **Ubuntu 24.04 LTS** (22.04 also fine), IPv4.
-  - Size: production alone **2 vCPU / 4 GB RAM / 40 GB disk** minimum (container memory limits add up to about 3.1 GB). Production **and** staging on one box: **8 GB RAM**. Pick a region near Nigeria/West Africa if offered (Frankfurt/London are fine).
-  - Send back: **the server IP** and the provider name.
+  - Size: **production 2 vCPU / 4 GB RAM / 40 GB disk** minimum (container memory limits add up to about 3.1 GB). **Staging: 2 vCPU / 2-4 GB** is enough for smoke tests. (Single-VPS option: **8 GB** for both.) Pick a region near Nigeria/West Africa if offered (Frankfurt/London are fine).
+  - Send back: **the production IP and the staging IP** and the provider name.
+- [ ] Repeat the host steps below on **each** VPS (staging host: only `/opt/workchop-staging`; production host: only `/opt/workchop`).
 - [ ] Log in as root once and create the deploy user (the same user GitHub Actions uses):
   ```bash
   adduser --disabled-password --gecos "" deploy
@@ -60,10 +63,12 @@ Recommendation: a **dedicated** VPS for Workchop (production isolation from your
   echo '/swapfile none swap sw 0 0' >> /etc/fstab && echo 'vm.swappiness=10' > /etc/sysctl.d/99-swap.conf && sysctl -p /etc/sysctl.d/99-swap.conf
   ```
 - [ ] Optional hardening: `apt-get install -y unattended-upgrades fail2ban`; after SSH key login works (step 3), set `PasswordAuthentication no` in `/etc/ssh/sshd_config` and `systemctl reload ssh`.
-- [ ] Create the deployment directories (owned by `deploy`) and the FCM secrets directory:
+- [ ] Create the deployment directory (owned by `deploy`) and its FCM secrets directory:
   ```bash
-  sudo mkdir -p /opt/workchop /opt/workchop-staging /opt/workchop/secrets
-  sudo chown -R deploy:deploy /opt/workchop /opt/workchop-staging
+  # production host
+  sudo mkdir -p /opt/workchop/secrets && sudo chown -R deploy:deploy /opt/workchop
+  # staging host
+  sudo mkdir -p /opt/workchop-staging/secrets && sudo chown -R deploy:deploy /opt/workchop-staging
   ```
 - [ ] Install nginx + certbot:
   ```bash
@@ -76,20 +81,23 @@ Recommendation: a **dedicated** VPS for Workchop (production isolation from your
 - [ ] At your DNS provider for `workchop.app` (or the domain you actually own; if it differs, change it in the two files under `deploy/nginx/` and in `.env.*.example` before you encrypt), create **A records** pointing at the VPS IPv4:
   | Host | Type | Value | TTL |
   |---|---|---|---|
-  | `staging-api` | A | `<VPS IP>` | 300 |
-  | `api` | A | `<VPS IP>` | 300 |
+  | `staging-api` | A | `<STAGING IP>` | 300 |
+  | `api` | A | `<PROD IP>` | 300 |
 - [ ] Check: `dig +short staging-api.workchop.app` and `dig +short api.workchop.app` both return the VPS IP before running certbot (step 8).
 - [ ] Send back: "DNS done" (and the real domain if it is not `workchop.app`).
 
 ## 3. SSH deploy key **[S+P]**
 
-- [ ] On **your Mac**:
+- [ ] On **your Mac**, **one key per environment** (a staging key must never open production):
   ```bash
-  ssh-keygen -t ed25519 -f ~/.ssh/workchop_deploy -C "gha-workchop" -N ""
-  ssh-copy-id -i ~/.ssh/workchop_deploy.pub deploy@<VPS IP>
-  ssh -i ~/.ssh/workchop_deploy deploy@<VPS IP> 'docker ps && echo ok'     # must print the table and "ok"
+  ssh-keygen -t ed25519 -f ~/.ssh/workchop_deploy_staging -C "gha-workchop-staging" -N ""
+  ssh-keygen -t ed25519 -f ~/.ssh/workchop_deploy_prod    -C "gha-workchop-prod"    -N ""
+  ssh-copy-id -i ~/.ssh/workchop_deploy_staging.pub deploy@<STAGING IP>      # staging key -> staging host ONLY
+  ssh-copy-id -i ~/.ssh/workchop_deploy_prod.pub    deploy@<PROD IP>         # prod key    -> production host ONLY
+  ssh -i ~/.ssh/workchop_deploy_staging deploy@<STAGING IP> 'docker ps && echo ok'   # must print the table and "ok"
+  ssh -i ~/.ssh/workchop_deploy_prod    deploy@<PROD IP>    'docker ps && echo ok'
   ```
-  (No passphrase is simplest. If you set one, also create the optional `VPS_SSH_PASSPHRASE` secret in step 6.)
+  (No passphrase is simplest. If you set one, also create the optional `VPS_SSH_PASSPHRASE` secret in step 6.) Single-VPS option: still use two keys and two users as described in step 1.
 - [ ] Optional but wise: accept the host key once so the first manual SSH is not blind: `ssh-keyscan <VPS IP>` and compare the fingerprint with your provider's console.
 
 ## 4. Branches and protection **[S+P]** (run once, from any clone, after this PR is merged)
@@ -109,7 +117,7 @@ I did **not** create `develop` or change any protection; these are the exact com
   JSON
   ```
   If `main` already has protection requiring `lint`/`test`, keep those two names: the jobs still have exactly those names.
-- [ ] `develop`: PR required + the **`CI gate`** check required (one check that always reports, even on docs-only PRs):
+- [ ] `develop`: PR required + the **`CI gate`** check required (one check that always reports, even on docs-only PRs). The same gate is also what the staging workflow waits for before it marks an image verified:
   ```bash
   gh api -X PUT repos/innocent98/workshop-backend/branches/develop/protection --input - <<'JSON'
   {"required_status_checks":{"strict":false,"contexts":["CI gate"]},"enforce_admins":false,
@@ -117,6 +125,15 @@ I did **not** create `develop` or change any protection; these are the exact com
    "required_linear_history":false,"allow_force_pushes":false,"allow_deletions":false}
   JSON
   ```
+- [ ] **Single-VPS option only:** protect `develop` as strictly as `main` plus review, so nobody (you included) pushes unreviewed workflow or compose changes straight to the branch that holds the staging SSH key:
+  ```bash
+  gh api -X PUT repos/innocent98/workshop-backend/branches/develop/protection --input - <<'JSON'
+  {"required_status_checks":{"strict":true,"contexts":["CI gate"]},"enforce_admins":true,
+   "required_pull_request_reviews":{"required_approving_review_count":1,"require_code_owner_reviews":false},"restrictions":null,
+   "required_linear_history":true,"allow_force_pushes":false,"allow_deletions":false}
+  JSON
+  ```
+  (With `enforce_admins: true` and one required approval a solo owner cannot merge their own PR; add a second trusted reviewer, or accept the default `develop` protection above and treat the risk as accepted. Either way: no collaborators with write access.)
 - [ ] Repo setting: Settings → General → Pull Requests: allow **squash merging** (PRs into `develop`). Never use the Merge button for `develop` → `main`; release with `git push origin origin/develop:main` (see `docs/deployment/BRANCHING.md`).
 
 ## 5. GitHub Environments **[S now, P later]**
@@ -152,9 +169,9 @@ Names are exactly what the workflows read (`grep -rhoE "(secrets|vars)\.[A-Za-z_
 - [ ] **[S]** staging secrets and variables:
   ```bash
   R=innocent98/workshop-backend
-  gh secret set VPS_HOST            --repo $R --env staging --body '<VPS IP or staging-api hostname>'
-  gh secret set VPS_USERNAME        --repo $R --env staging --body 'deploy'
-  gh secret set VPS_SSH_KEY         --repo $R --env staging < ~/.ssh/workchop_deploy
+  gh secret set VPS_HOST            --repo $R --env staging --body '<STAGING IP or staging-api hostname>'
+  gh secret set VPS_USERNAME        --repo $R --env staging --body 'deploy'      # 'deploy-staging' on the single-VPS option
+  gh secret set VPS_SSH_KEY         --repo $R --env staging < ~/.ssh/workchop_deploy_staging
   gh secret set DEPLOY_PATH         --repo $R --env staging --body '/opt/workchop-staging'
   gh secret set ENV_ENCRYPTION_KEY  --repo $R --env staging --body "$(cat .env.staging.key)"
   gh variable set APP_URL           --repo $R --env staging --body 'https://staging-api.workchop.app'
@@ -163,9 +180,9 @@ Names are exactly what the workflows read (`grep -rhoE "(secrets|vars)\.[A-Za-z_
   `APP_URL` is the **origin only** (no `/api/v1`): the E2E suite appends paths itself.
 - [ ] **[P]** production, same names, production values:
   ```bash
-  gh secret set VPS_HOST            --repo $R --env production --body '<VPS IP or api hostname>'
-  gh secret set VPS_USERNAME        --repo $R --env production --body 'deploy'
-  gh secret set VPS_SSH_KEY         --repo $R --env production < ~/.ssh/workchop_deploy
+  gh secret set VPS_HOST            --repo $R --env production --body '<PROD IP or api hostname>'
+  gh secret set VPS_USERNAME        --repo $R --env production --body 'deploy'   # 'deploy-prod' on the single-VPS option
+  gh secret set VPS_SSH_KEY         --repo $R --env production < ~/.ssh/workchop_deploy_prod
   gh secret set DEPLOY_PATH         --repo $R --env production --body '/opt/workchop'
   gh secret set ENV_ENCRYPTION_KEY  --repo $R --env production --body "$(cat .env.production.key)"
   gh variable set APP_URL           --repo $R --env production --body 'https://api.workchop.app'
@@ -188,7 +205,7 @@ Names are exactly what the workflows read (`grep -rhoE "(secrets|vars)\.[A-Za-z_
   git checkout -b chore/staging-env && git add .env.staging.enc && git commit -m "chore: staging environment (encrypted)"
   rm .env.staging
   ```
-  (Then open a PR into `develop`; before `develop` exists, put it in a PR to `main`.) `git status` must never show `.env.staging`, `.env.production` or `.env.<env>.key` (they are gitignored).
+  (Then open a PR into `develop`; before `develop` exists, put it in a PR to `main`.) `git status` must never show `.env.staging`, `.env.production` or `.env.<env>.key` (they are gitignored). `env.sh` has **no shared-key fallback**: it reads `ENV_ENCRYPTION_KEY_STAGING`/`_PRODUCTION` or `.env.<env>.key` and prints which one it used; a stray `ENV_ENCRYPTION_KEY` in your shell is ignored on purpose.
 - [ ] **[P]** Same for production later: `cp .env.production.example .env.production`, fill with **live** values, `./scripts/env.sh encrypt production`, `verify`, commit `.env.production.enc`, `rm .env.production`.
 
 | Variable(s) | Staging | Production | Where you get it |
@@ -211,11 +228,17 @@ Names are exactly what the workflows read (`grep -rhoE "(secrets|vars)\.[A-Za-z_
 
 - [ ] **[S+P]** Firebase service account JSON → the VPS (the file must **exist** before the first deploy or Docker creates a *directory* at that path, even when `FCM_ENABLED=false`):
   1. Firebase console → project settings (the project the mobile app uses; the code's default file name mentions `workchop-b3069`) → **Service accounts** → **Generate new private key**.
-  2. ```bash
-     scp ~/Downloads/<downloaded>.json deploy@<VPS IP>:/opt/workchop/secrets/fcm-service-account.json
-     ssh deploy@<VPS IP> 'sudo chown 1000:1000 /opt/workchop/secrets/fcm-service-account.json && chmod 600 /opt/workchop/secrets/fcm-service-account.json'
+  2. **Production host:**
+     ```bash
+     scp ~/Downloads/<downloaded>.json deploy@<PROD IP>:/opt/workchop/secrets/fcm-service-account.json
+     ssh deploy@<PROD IP> 'sudo chown 1000:1000 /opt/workchop/secrets/fcm-service-account.json && chmod 600 /opt/workchop/secrets/fcm-service-account.json'
      ```
-     (UID 1000 is the non-root user inside the API image.) For staging with `FCM_ENABLED=false` you may instead put `{}` in that file.
+     (UID 1000 is the non-root user inside the API image.)
+  3. **Staging host: never the production service account.** With `FCM_ENABLED=false` (the staging default) create a placeholder; if you want real pushes on staging, create a separate Firebase project and use its key instead:
+     ```bash
+     ssh deploy@<STAGING IP> "echo '{}' > /opt/workchop-staging/secrets/fcm-service-account.json && sudo chown 1000:1000 /opt/workchop-staging/secrets/fcm-service-account.json && chmod 600 /opt/workchop-staging/secrets/fcm-service-account.json"
+     ```
+     `.env.staging.example` already points `FCM_SERVICE_ACCOUNT_FILE_HOST` at `/opt/workchop-staging/secrets/`.
 - [ ] **[S]** nginx for staging, on the VPS (files are in this repo under `deploy/nginx/`; copy them over with `scp` or paste):
   ```bash
   sudo cp workchop-proxy.conf        /etc/nginx/snippets/workchop-proxy.conf
@@ -237,16 +260,17 @@ Names are exactly what the workflows read (`grep -rhoE "(secrets|vars)\.[A-Za-z_
 - [ ] Make sure steps 1 to 8 are done and `.env.staging.enc` is on `develop` (or `main` before `develop` exists).
 - [ ] If `develop` does not exist yet, create it now (step 4's first command). The push runs **CD (staging)**: build → GHCR → deploy → live E2E → "Mark image as staging-verified". Watch: `gh run watch --repo innocent98/workshop-backend`.
 - [ ] GHCR: nothing to configure. The first run creates `ghcr.io/innocent98/workshop-backend` (private, auto-linked to the repo by the image's source label); the VPS pulls with the run's own token. If the pull says `denied`, open the package's settings and make sure the repo has **Read** access.
-- [ ] On the VPS after a green run: `cd /opt/workchop-staging && docker compose -f docker-compose.prod.yml ps` should show `api`, `celery_worker`, `celery_beat` healthy plus `db`, `redis`; `curl -s https://staging-api.workchop.app/api/v1/health` → `{"status":"ok",...}`.
+- [ ] Note: "Mark image as staging-verified" waits (up to 30 min) for the **`CI gate`** check on that commit to be green. If CI is red the image is **not** verified and production will refuse it; fix CI and push again.
+- [ ] On the staging host after a green run: `cd /opt/workchop-staging && docker compose -f docker-compose.prod.yml ps` should show `api`, `celery_worker`, `celery_beat` healthy plus `db`, `redis`; `curl -s https://staging-api.workchop.app/api/v1/health` → `{"status":"ok",...}`.
 - [ ] Send back: "staging is up" (or the failing step's log).
 
 ## 10. Seed data and admin **[S+P, once per environment, after the first green deploy]**
 
 - [ ] Seed the service catalogue (idempotent): 
-  `ssh deploy@<VPS IP> 'cd /opt/workchop-staging && docker compose -f docker-compose.prod.yml exec api python scripts/seed_services.py'`
+  `ssh deploy@<STAGING IP> 'cd /opt/workchop-staging && docker compose -f docker-compose.prod.yml exec api python scripts/seed_services.py'`
 - [ ] Create the first admin from `FIRST_SUPERUSER_*` (idempotent; refuses if a non-admin with that email exists):
-  `ssh deploy@<VPS IP> 'cd /opt/workchop-staging && docker compose -f docker-compose.prod.yml exec api python scripts/create_admin.py'`
-  then log in once and change the password. (Production: same with `/opt/workchop`.)
+  `ssh deploy@<STAGING IP> 'cd /opt/workchop-staging && docker compose -f docker-compose.prod.yml exec api python scripts/create_admin.py'`
+  then log in once and change the password. (Production: same on `<PROD IP>` with `/opt/workchop`.)
 
 ## 11. Providers
 
@@ -273,7 +297,7 @@ Names are exactly what the workflows read (`grep -rhoE "(secrets|vars)\.[A-Za-z_
 ## 12. Production release **[P]**
 
 - [ ] Steps 5 (`production` environment), 6 (production secrets/variables), 7 (`.env.production.enc` with **live** keys) and 8 (prod nginx + TLS, FCM file) are done.
-- [ ] **Snapshot before the migration.** The production deploy takes a database snapshot automatically before `alembic upgrade head` whenever a database already exists (`backups/` on the VPS). This release carries migration `a4c8e2f6b1d9` (review-moderation columns + a response-time backfill in one transaction). On the **very first** production deploy there is no database yet, so there is nothing to protect.
+- [ ] **Snapshot before the migration.** The production deploy takes a database snapshot automatically before `alembic upgrade head` whenever a database already exists (`backups/` on the VPS). A manual rollback (`image_tag`) skips migrations and the snapshot by design (`docs/deployment/ROLLBACK.md`). This release carries migration `a4c8e2f6b1d9` (review-moderation columns + a response-time backfill in one transaction). On the **very first** production deploy there is no database yet, so there is nothing to protect.
 - [ ] Release. If `develop` was created from the same commit as `main` (the normal first time), `git push origin origin/develop:main` is a no-op and triggers nothing, so run the production workflow by hand against the verified image:
   1. Actions → **CD (staging)** → the green run → copy the image tag `sha-xxxxxxx` (first 7 characters of the commit), **or** read it from GHCR.
   2. ```bash
@@ -282,7 +306,7 @@ Names are exactly what the workflows read (`grep -rhoE "(secrets|vars)\.[A-Za-z_
      (From the second release on: merge a PR into `develop`, wait for the green staging run, then `git fetch origin && git push origin origin/develop:main`.)
   3. Approve the deployment in the Actions UI (you are the required reviewer).
 - [ ] Then step 10 for production (`/opt/workchop`): seed services, create the admin.
-- [ ] Backups: the production deploy installs the nightly cron (02:00). Verify next day: `ssh deploy@<VPS IP> 'bash /opt/workchop/scripts/backup_status.sh'` from `/opt/workchop`. Recommended: also enable an offsite copy (`ENABLE_CLOUD_BACKUP=true`, Backblaze B2 via rclone: `docs/deployment/BACKUPS_GUIDE.md`), because local dumps die with the VPS disk. Do one **restore drill** on staging with a production-shaped dump.
+- [ ] Backups: the production deploy installs the nightly cron (02:00). Verify next day: `ssh deploy@<PROD IP> 'cd /opt/workchop && bash scripts/backup_status.sh'`. Recommended: also enable an offsite copy (`ENABLE_CLOUD_BACKUP=true`, Backblaze B2 via rclone: `docs/deployment/BACKUPS_GUIDE.md`), because local dumps die with the VPS disk. Do one **restore drill** on staging with a production-shaped dump.
 
 ## 13. Clean-ups and people **[P, before launch]**
 

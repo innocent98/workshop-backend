@@ -104,3 +104,9 @@ Everything below differs from the stock template; see `docs/sop/deploy-pipeline.
 | Pre-migration snapshot | Production runs `scripts/backup_cron.sh` before `alembic upgrade head` when a database exists. |
 | Image prune | Scoped to images carrying this repo's `org.opencontainers.image.source` label; the VPS is shared, a bare `prune -a` would delete other projects' unused images. |
 | Poetry | Pinned to 2.2.1, the version that generated `poetry.lock`. |
+| "Verified" needs CI | `mark-verified` waits (up to 30 min) for the `CI gate` check run on the same commit and refuses to tag the image if it is red or missing. Without this, a commit with failing tests could be deployed to staging, pass the 7 read-only smoke checks, be stamped verified and be fast-forwarded to production. |
+| Health gate | After the API answers, the deploy also waits for `celery_worker` and `celery_beat` to be `healthy` with no restarts (they run payouts, reconcile and auto-confirm). Otherwise: automatic rollback. |
+| Rollback scope | Automatic rollback restores the previous image on `api`, `celery_worker` **and** `celery_beat`. |
+| Manual rollback | `image_tag` dispatches pass `run_migrations: false`: no snapshot, no `alembic upgrade head` (the older image does not know the newer revision). Migrations are forward-only; see `ROLLBACK.md`. |
+| Two hosts, two keys | Staging and production are separate VPSs with separate SSH keys by default (the `deploy` user is root-equivalent through Docker; a shared host lets whoever controls `develop` reach production). Single-VPS is an accepted-risk option documented in the owner checklist. |
+| Encryption keys | One key per environment, no shared fallback in `scripts/env.sh`. |
