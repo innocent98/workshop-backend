@@ -45,6 +45,7 @@ unchanged after the pins were removed.
 |---|---|---|
 | `jaraco.context` 5.3.0 and `wheel` 0.45.1 (both HIGH) | both are **vendored inside `setuptools`** (79.0.1 in the base image, `setuptools/_vendor/...`), not in our lock. CI's first Trivy scan of this PR reported exactly these two as the only remaining findings (`Total: 2`). setuptools >= 80.10.2 vendors jaraco.context 6.1.0 and wheel 0.46.3 | `RUN pip install --no-cache-dir -U "setuptools>=80.10.2"` in **both** Dockerfile stages. The runtime stage needs its own: its `COPY` from the builder only overlays files, so the base image's old vendored `*.dist-info` directories would otherwise survive |
 | `zlib1g` (HIGH, OS) | handled by `apt-get upgrade` in the runtime stage | none |
+| Trivy secret scan: `stripe-secret-token` in `scripts/capture_payments_wallet.py:47` (CRITICAL) | surfaced once Trivy became blocking (report-only mode never failed on it). It is the placeholder `sk_test_placeh...` the dev capture script feeds to a local Paystack stub, not a real key, and the script is a dev tool that has no place in the production image | `scripts/capture_*.py` added to `.dockerignore`, so it no longer ships. No `.trivyignore` entry needed |
 
 ### Accepted: unfixed, no upstream release (Trivy hides these via `ignore-unfixed`)
 
@@ -76,7 +77,7 @@ Both found by comparing the old stack (fastapi 0.115 / starlette 0.38) with the 
 | Area | Files |
 |---|---|
 | Dependencies | `pyproject.toml` (fastapi, python-multipart, python-jose, pillow), `poetry.lock` (regenerated with Poetry 2.2.1) |
-| Dockerfile / CI | `Dockerfile` (setuptools upgrade, both stages), `.github/workflows/ci.yml` (Trivy `exit-code: '1'`, job renamed `Image builds (Trivy)`, TEMPORARY labels removed), `docs/sop/deploy-pipeline.md`, `docs/deployment/OWNER-SETUP-CHECKLIST.md`, `docs/deployment/CICD_PIPELINE.md` |
+| Dockerfile / CI | `Dockerfile` (setuptools upgrade, both stages), `.dockerignore` (`scripts/capture_*.py`), `.github/workflows/ci.yml` (Trivy `exit-code: '1'`, job renamed `Image builds (Trivy)`, TEMPORARY labels removed), `docs/sop/deploy-pipeline.md`, `docs/deployment/OWNER-SETUP-CHECKLIST.md`, `docs/deployment/CICD_PIPELINE.md` |
 | Code | `app/main.py` (`strict_content_type=False`), `app/api/deps.py` (`HTTPBearer403`) |
 | Tests | `tests/test_dependency_upgrade_guards.py` (17 characterization tests, below) |
 | Not touched | migrations (no schema change), Pillow/jose/multipart call sites (no API they use was removed) |

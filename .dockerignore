@@ -33,3 +33,6 @@ requirements.txt
 requirements-dev.txt
 .env.*
 !.env.example
+
+# Dev-only evidence capture script (contains a fake Paystack test key for a local stub; Trivy flags it as a secret)
+scripts/capture_*.py
