@@ -1,0 +1,25 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/reviews/booking/5",
+    "body": null
+  },
+  "status": 200,
+  "response": {
+    "id": 2,
+    "booking_id": 5,
+    "customer_id": "24c879e6-63d4-4fa6-b009-afe78335a4ae",
+    "artisan_id": "df631428-50f0-42d4-a868-59aaffb7a300",
+    "rating": 1.0,
+    "review_text": "This man na mumu, total idiot. Never again.",
+    "is_anonymous": false,
+    "is_flagged": true,
+    "artisan_response": null,
+    "artisan_responded_at": null,
+    "created_at": "2026-11-18T22:07:26.134379Z",
+    "updated_at": "2026-11-18T22:07:26.134379Z",
+    "customer_name": "Customer Two",
+    "artisan_name": "Demo Artisan"
+  },
+  "note": "the reviewer still sees the hidden review"
+}

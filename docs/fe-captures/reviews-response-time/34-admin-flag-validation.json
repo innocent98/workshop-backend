@@ -1,0 +1,26 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/admin/reviews/1/flag",
+    "body": {
+      "note": "x"
+    }
+  },
+  "status": 422,
+  "response": {
+    "detail": [
+      {
+        "type": "string_too_short",
+        "loc": [
+          "body",
+          "note"
+        ],
+        "msg": "String should have at least 3 characters",
+        "input": "x",
+        "ctx": {
+          "min_length": 3
+        }
+      }
+    ]
+  }
+}

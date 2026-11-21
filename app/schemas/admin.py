@@ -113,3 +113,39 @@ class AdminArtisanVerificationResponse(BaseModel):
     verification_method: Optional[str] = None
     verified_at: Optional[datetime] = None
     verification_failure_reason: Optional[str] = None
+
+
+class AdminReviewItem(BaseModel):
+    id: int
+    booking_id: int
+    rating: float
+    review_text: Optional[str] = None
+    is_anonymous: bool
+    customer_id: str
+    customer_name: Optional[str] = None
+    artisan_id: str
+    artisan_name: Optional[str] = None
+    is_flagged: bool
+    flag_source: Optional[str] = None  # auto | admin
+    flag_reason: Optional[str] = None
+    flagged_at: Optional[datetime] = None
+    open_report_count: int
+    created_at: datetime
+
+
+class AdminReviewReportItem(BaseModel):
+    id: int
+    reporter_id: str
+    reporter_name: Optional[str] = None
+    reason: str
+    details: Optional[str] = None
+    created_at: datetime
+    resolved_at: Optional[datetime] = None
+
+
+class AdminReviewDetail(AdminReviewItem):
+    reports: List[AdminReviewReportItem]
+
+
+class ReviewModerationRequest(BaseModel):
+    note: str = Field(..., min_length=3, max_length=500)

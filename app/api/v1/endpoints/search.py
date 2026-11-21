@@ -188,10 +188,11 @@ def search_artisans(
         else:
             query = query.order_by(func.ST_Distance(ArtisanProfile.location, search_point_geog))
     else:
-        if sort_order == "desc":
-            query = query.order_by(sort_column.desc())
-        else:
-            query = query.order_by(sort_column)
+        ordering = sort_column.desc() if sort_order == "desc" else sort_column
+        if sort_by == "response_time":
+            # Artisans with no accepted booking yet have no figure: never rank them above real ones.
+            ordering = ordering.nulls_last()
+        query = query.order_by(ordering)
 
     # Get total count
     total = query.count()

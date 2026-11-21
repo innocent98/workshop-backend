@@ -18,11 +18,19 @@ from app.db.models.admin import AdminAuditLog, DisputeResolution, DisputeResolut
 from app.db.models.artisan_profile import ArtisanProfile
 from app.db.models.booking import Booking, BookingStatus
 from app.db.models.payment import Payment, PaymentStatus
+from app.db.models.review import Review, ReviewReport
 from app.db.models.user import User, UserType
-from app.schemas.admin import AdminArtisanVerificationResponse, ResolveDisputeResponse
+from app.schemas.admin import (
+    AdminArtisanVerificationResponse,
+    AdminReviewDetail,
+    AdminReviewItem,
+    AdminReviewReportItem,
+    ResolveDisputeResponse,
+)
 from app.services.escrow import get_escrow_provider
 from app.services.notify import notify_user
 from app.services.provider_errors import ProviderError
+from app.services.review_ratings import recalculate_artisan_rating
 
 
 def _err(code: str, message: str, http_status: int) -> HTTPException:
@@ -687,3 +695,136 @@ def admin_reject_artisan(db: Session, admin: User, user_id: UUID, note: str):
         {"event": "verification_rejected"},
     )
     return _verification_response(profile)
+
+
+# ------------------------------------------------------------------ reviews
+
+
+def review_item(review: Review) -> AdminReviewItem:
+    return AdminReviewItem(
+        id=review.id,
+        booking_id=review.booking_id,
+        rating=review.rating,
+        review_text=review.review_text,
+        is_anonymous=review.is_anonymous,
+        customer_id=str(review.customer_id),
+        customer_name=review.customer.full_name if review.customer else None,
+        artisan_id=str(review.artisan_id),
+        artisan_name=review.artisan.full_name if review.artisan else None,
+        is_flagged=review.is_flagged,
+        flag_source=review.flag_source,
+        flag_reason=review.flag_reason,
+        flagged_at=review.flagged_at,
+        open_report_count=review.open_report_count or 0,
+        created_at=review.created_at,
+    )
+
+
+def review_detail(db: Session, review: Review) -> AdminReviewDetail:
+    reports = (
+        db.query(ReviewReport)
+        .filter(ReviewReport.review_id == review.id)
+        .order_by(ReviewReport.created_at.asc(), ReviewReport.id.asc())
+        .all()
+    )
+    return AdminReviewDetail(
+        **review_item(review).model_dump(),
+        reports=[
+            AdminReviewReportItem(
+                id=r.id,
+                reporter_id=str(r.reporter_id),
+                reporter_name=r.reporter.full_name if r.reporter else None,
+                reason=r.reason,
+                details=r.details,
+                created_at=r.created_at,
+                resolved_at=r.resolved_at,
+            )
+            for r in reports
+        ],
+    )
+
+
+def _locked_review(db: Session, review_id: int) -> Review:
+    review = db.query(Review).filter(Review.id == review_id).with_for_update().first()
+    if review is None:
+        raise _err("review_not_found", "Review not found", status.HTTP_404_NOT_FOUND)
+    return review
+
+
+def _resolve_open_reports(db: Session, review: Review, now: datetime) -> int:
+    resolved = (
+        db.query(ReviewReport)
+        .filter(ReviewReport.review_id == review.id, ReviewReport.resolved_at.is_(None))
+        .update({ReviewReport.resolved_at: now}, synchronize_session=False)
+    )
+    review.open_report_count = 0
+    return resolved
+
+
+def admin_flag_review(db: Session, admin: User, review_id: int, note: str) -> AdminReviewItem:
+    """Hide a review (flag it) and take it out of the artisan's public rating. Also confirms an
+    auto-flag or settles open reports: flagging an already-flagged review is allowed (it records
+    the admin's decision and closes the reports)."""
+    review = _locked_review(db, review_id)
+    now = _now()
+    was_flagged = review.is_flagged
+    review.is_flagged = True
+    review.flag_source = "admin"
+    review.flag_reason = note
+    review.flagged_at = now
+    resolved = _resolve_open_reports(db, review, now)
+    recalculate_artisan_rating(db, review.artisan_id)
+    audit(
+        db,
+        admin,
+        "review.flag",
+        "review",
+        review_id,
+        {"note": note, "was_flagged": was_flagged, "reports_resolved": resolved},
+    )
+    db.commit()
+    db.refresh(review)
+    return review_item(review)
+
+
+def admin_unflag_review(db: Session, admin: User, review_id: int, note: str) -> AdminReviewItem:
+    """Restore a hidden review into the public listing and the artisan's rating, or dismiss open
+    reports on a review that was never hidden. Nothing to do on either → 409."""
+    review = _locked_review(db, review_id)
+    if not review.is_flagged and not review.open_report_count:
+        raise _err(
+            "review_not_flagged",
+            "This review is not flagged and has no open reports.",
+            status.HTTP_409_CONFLICT,
+        )
+    now = _now()
+    was_flagged = review.is_flagged
+    review.is_flagged = False
+    review.flag_source = None
+    review.flag_reason = None
+    review.flagged_at = None
+    resolved = _resolve_open_reports(db, review, now)
+    recalculate_artisan_rating(db, review.artisan_id)
+    audit(
+        db,
+        admin,
+        "review.unflag",
+        "review",
+        review_id,
+        {"note": note, "was_flagged": was_flagged, "reports_resolved": resolved},
+    )
+    db.commit()
+    db.refresh(review)
+    if was_flagged:
+        # The artisan was never told about this review while it was hidden: announce it now.
+        notify_user(
+            review.artisan_id,
+            "New review",
+            f"You received a {review.rating:g}-star review.",
+            {
+                "booking_id": str(review.booking_id),
+                "review_id": str(review.id),
+                "event": "review_received",
+            },
+        )
+    return review_item(review)

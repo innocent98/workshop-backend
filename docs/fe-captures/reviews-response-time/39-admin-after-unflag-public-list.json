@@ -1,0 +1,53 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/reviews/artisan/df631428-50f0-42d4-a868-59aaffb7a300",
+    "body": null
+  },
+  "status": 200,
+  "response": {
+    "reviews": [
+      {
+        "id": 3,
+        "booking_id": 6,
+        "customer_id": "6e254903-d37c-4255-bb49-4313a27f9d16",
+        "artisan_id": "df631428-50f0-42d4-a868-59aaffb7a300",
+        "rating": 3.0,
+        "review_text": "Decent job, a bit slow but the sink is fixed.",
+        "is_anonymous": false,
+        "is_flagged": false,
+        "artisan_response": null,
+        "artisan_responded_at": null,
+        "created_at": "2026-11-18T22:07:26.171264Z",
+        "updated_at": "2026-11-18T22:07:45.387283Z",
+        "customer_name": "Customer Three",
+        "artisan_name": "Demo Artisan"
+      },
+      {
+        "id": 1,
+        "booking_id": 4,
+        "customer_id": "e518bc7d-899e-4aae-9518-4e7bc32a80dc",
+        "artisan_id": "df631428-50f0-42d4-a868-59aaffb7a300",
+        "rating": 5.0,
+        "review_text": "Excellent work, finished on time and very professional.",
+        "is_anonymous": false,
+        "is_flagged": false,
+        "artisan_response": null,
+        "artisan_responded_at": null,
+        "created_at": "2026-11-18T22:07:07.005315Z",
+        "updated_at": "2026-11-18T22:07:45.548124Z",
+        "customer_name": "Customer One",
+        "artisan_name": "Demo Artisan"
+      }
+    ],
+    "total": 2,
+    "average_rating": 4.0,
+    "rating_distribution": {
+      "1": 0,
+      "2": 0,
+      "3": 1,
+      "4": 0,
+      "5": 1
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/reviews/booking/6",
+    "body": null
+  },
+  "status": 404,
+  "response": {
+    "detail": "Review not found for this booking"
+  },
+  "note": "same 404 as a booking with no review"
+}

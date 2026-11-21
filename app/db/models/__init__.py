@@ -8,7 +8,7 @@ from app.db.models.password_reset import PasswordResetToken
 from app.db.models.payment import Payment, PaymentMethod, PaymentReference, PaymentStatus
 from app.db.models.portfolio import Portfolio
 from app.db.models.push_device import PushDevice, PushPlatform
-from app.db.models.review import Review
+from app.db.models.review import Review, ReviewReport
 from app.db.models.service import Service, UserService
 from app.db.models.service_category import ServiceCategory
 from app.db.models.user import User, UserType
@@ -37,6 +37,7 @@ __all__ = [
     "Withdrawal",
     "WithdrawalStatus",
     "Review",
+    "ReviewReport",
     "BookingProgressLog",
     "PushDevice",
     "PushPlatform",

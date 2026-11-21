@@ -1,0 +1,15 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/reviews/2/report",
+    "body": {
+      "reason": "abusive",
+      "details": null
+    }
+  },
+  "status": 201,
+  "response": {
+    "review_id": 2,
+    "reported": true
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/reviews/3/report",
+    "body": {
+      "reason": "fake",
+      "details": "Never booked me for this."
+    }
+  },
+  "status": 201,
+  "response": {
+    "review_id": 3,
+    "reported": true
+  },
+  "note": "the reviewed artisan reports too"
+}

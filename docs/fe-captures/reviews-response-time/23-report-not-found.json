@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/reviews/99999/report",
+    "body": {
+      "reason": "spam",
+      "details": null
+    }
+  },
+  "status": 404,
+  "response": {
+    "detail": {
+      "code": "review_not_found",
+      "message": "Review not found"
+    }
+  }
+}

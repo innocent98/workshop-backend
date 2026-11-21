@@ -1,0 +1,16 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/profiles/artisans/me/stats",
+    "body": null
+  },
+  "status": 200,
+  "response": {
+    "average_rating": 0.0,
+    "total_ratings": 0,
+    "total_jobs_completed": 0,
+    "response_time_avg_minutes": 33,
+    "acceptance_rate": 0.0
+  },
+  "note": "average of the two"
+}

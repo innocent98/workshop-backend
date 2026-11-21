@@ -16,6 +16,7 @@ from app.api.deps import require_admin
 from app.db.models.artisan_profile import ArtisanProfile
 from app.db.models.booking import Booking, BookingStatus
 from app.db.models.payment import Payment, PaymentStatus
+from app.db.models.review import Review
 from app.db.models.user import User, UserType
 from app.db.session import get_db
 from app.schemas.admin import (
@@ -23,12 +24,15 @@ from app.schemas.admin import (
     AdminBookingItem,
     AdminDisputeItem,
     AdminPaymentItem,
+    AdminReviewDetail,
+    AdminReviewItem,
     AdminUserItem,
     ArtisanRejectRequest,
     ArtisanVerifyRequest,
     Page,
     ResolveDisputeRequest,
     ResolveDisputeResponse,
+    ReviewModerationRequest,
 )
 from app.services import admin as admin_service
 
@@ -308,3 +312,68 @@ def reject_artisan(
     db: Session = Depends(get_db),
 ):
     return admin_service.admin_reject_artisan(db, admin, user_id, body.note.strip())
+
+
+# ------------------------------------------------------------- reviews
+
+
+@router.get("/reviews", response_model=Page[AdminReviewItem])
+def list_reviews(
+    params: PageParams = Depends(),
+    queue: str = Query(
+        "needs_attention",
+        pattern="^(needs_attention|flagged|reported)$",
+        description="flagged = hidden, reported = open user reports, needs_attention = either",
+    ),
+    artisan_id: Optional[UUID] = None,
+    db: Session = Depends(get_db),
+):
+    """Moderation queue: hidden (flagged) reviews and reviews with open user reports."""
+    query = db.query(Review).options(joinedload(Review.customer), joinedload(Review.artisan))
+    if queue == "flagged":
+        query = query.filter(Review.is_flagged.is_(True))
+    elif queue == "reported":
+        query = query.filter(Review.open_report_count > 0)
+    else:
+        query = query.filter(or_(Review.is_flagged.is_(True), Review.open_report_count > 0))
+    if artisan_id:
+        query = query.filter(Review.artisan_id == artisan_id)
+    return _page(
+        query,
+        params,
+        admin_service.review_item,
+        [Review.open_report_count.desc(), Review.created_at.desc(), Review.id.desc()],
+    )
+
+
+@router.get("/reviews/{review_id}", response_model=AdminReviewDetail)
+def get_review(review_id: int, db: Session = Depends(get_db)):
+    review = (
+        db.query(Review)
+        .options(joinedload(Review.customer), joinedload(Review.artisan))
+        .filter(Review.id == review_id)
+        .first()
+    )
+    if review is None:
+        raise admin_service._err("review_not_found", "Review not found", 404)
+    return admin_service.review_detail(db, review)
+
+
+@router.post("/reviews/{review_id}/flag", response_model=AdminReviewItem)
+def flag_review(
+    review_id: int,
+    body: ReviewModerationRequest,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    return admin_service.admin_flag_review(db, admin, review_id, body.note.strip())
+
+
+@router.post("/reviews/{review_id}/unflag", response_model=AdminReviewItem)
+def unflag_review(
+    review_id: int,
+    body: ReviewModerationRequest,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    return admin_service.admin_unflag_review(db, admin, review_id, body.note.strip())

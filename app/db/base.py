@@ -21,6 +21,7 @@ def import_models():
         Portfolio,
         PushDevice,
         Review,
+        ReviewReport,
         Service,
         ServiceCategory,
         User,

@@ -1,0 +1,11 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/admin/reviews",
+    "body": null
+  },
+  "status": 403,
+  "response": {
+    "detail": "Not authenticated"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/reviews/1/report",
+    "body": {
+      "reason": "other",
+      "details": null
+    }
+  },
+  "status": 403,
+  "response": {
+    "detail": {
+      "code": "cannot_report_own_review",
+      "message": "You cannot report your own review."
+    }
+  }
+}

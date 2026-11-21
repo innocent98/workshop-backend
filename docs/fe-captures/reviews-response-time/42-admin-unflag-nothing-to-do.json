@@ -1,0 +1,16 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/admin/reviews/2/unflag",
+    "body": {
+      "note": "again"
+    }
+  },
+  "status": 409,
+  "response": {
+    "detail": {
+      "code": "review_not_flagged",
+      "message": "This review is not flagged and has no open reports."
+    }
+  }
+}

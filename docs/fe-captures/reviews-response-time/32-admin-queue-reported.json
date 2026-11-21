@@ -1,0 +1,67 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/admin/reviews?queue=reported",
+    "body": null
+  },
+  "status": 200,
+  "response": {
+    "items": [
+      {
+        "id": 3,
+        "booking_id": 6,
+        "rating": 3.0,
+        "review_text": "Decent job, a bit slow but the sink is fixed.",
+        "is_anonymous": false,
+        "customer_id": "6e254903-d37c-4255-bb49-4313a27f9d16",
+        "customer_name": "Customer Three",
+        "artisan_id": "df631428-50f0-42d4-a868-59aaffb7a300",
+        "artisan_name": "Demo Artisan",
+        "is_flagged": false,
+        "flag_source": null,
+        "flag_reason": null,
+        "flagged_at": null,
+        "open_report_count": 1,
+        "created_at": "2026-11-18T22:07:26.171264Z"
+      },
+      {
+        "id": 2,
+        "booking_id": 5,
+        "rating": 1.0,
+        "review_text": "This man na mumu, total idiot. Never again.",
+        "is_anonymous": false,
+        "customer_id": "24c879e6-63d4-4fa6-b009-afe78335a4ae",
+        "customer_name": "Customer Two",
+        "artisan_id": "df631428-50f0-42d4-a868-59aaffb7a300",
+        "artisan_name": "Demo Artisan",
+        "is_flagged": true,
+        "flag_source": "auto",
+        "flag_reason": "Automatic filter: abusive language (en, pcm)",
+        "flagged_at": "2026-11-18T22:07:26.142629Z",
+        "open_report_count": 1,
+        "created_at": "2026-11-18T22:07:26.134379Z"
+      },
+      {
+        "id": 1,
+        "booking_id": 4,
+        "rating": 5.0,
+        "review_text": "Excellent work, finished on time and very professional.",
+        "is_anonymous": false,
+        "customer_id": "e518bc7d-899e-4aae-9518-4e7bc32a80dc",
+        "customer_name": "Customer One",
+        "artisan_id": "df631428-50f0-42d4-a868-59aaffb7a300",
+        "artisan_name": "Demo Artisan",
+        "is_flagged": false,
+        "flag_source": null,
+        "flag_reason": null,
+        "flagged_at": null,
+        "open_report_count": 1,
+        "created_at": "2026-11-18T22:07:07.005315Z"
+      }
+    ],
+    "total": 3,
+    "page": 1,
+    "page_size": 20,
+    "pages": 1
+  }
+}
